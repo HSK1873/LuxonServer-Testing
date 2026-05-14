@@ -11,22 +11,21 @@
  * ============================================================================ */
 
 #if defined(FFI_WASM) || defined(__wasm__)
-// Target WASI-SDK directly instead of Emscripten
 #if defined(__GNUC__) || defined(__clang__)
-#define FFI_EXPORT __attribute__((visibility("default"))) __attribute__((used))
+#define FFI_EXPORT(name) __attribute__((export_name(name))) __attribute__((visibility("default"))) __attribute__((used))
 #else
-#define FFI_EXPORT
+#define FFI_EXPORT(name)
 #endif
 #elif defined(_WIN32)
 #if defined(FFI_BUILD_IMPL)
-#define FFI_EXPORT __declspec(dllexport)
+#define FFI_EXPORT(name) __declspec(dllexport)
 #else
-#define FFI_EXPORT __declspec(dllimport)
+#define FFI_EXPORT(name) __declspec(dllimport)
 #endif
 #elif defined(__GNUC__) || defined(__clang__)
-#define FFI_EXPORT __attribute__((visibility("default")))
+#define FFI_EXPORT(name) __attribute__((visibility("default")))
 #else
-#define FFI_EXPORT
+#define FFI_EXPORT(name)
 #endif
 
 /* ============================================================================

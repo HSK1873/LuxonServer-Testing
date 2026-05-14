@@ -21,7 +21,6 @@
 #include "luxon/server/apps.hpp"
 #endif
 
-#include <cstring>
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -31,6 +30,8 @@
 #include <span>
 #include <exception>
 #include <typeinfo>
+#include <cstring>
+#include <cstddef>
 
 /* ============================================================================
  * INTERNAL FFI STATE & ERROR MANAGEMENT
@@ -101,6 +102,14 @@ template <typename HandleT, typename T> inline HandleT wrap(T *ptr) {
     return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
 #else
     return reinterpret_cast<HandleT>(ptr);
+#endif
+}
+
+template <typename HandleT> inline HandleT wrap(std::nullptr_t) {
+#if defined(FFI_WASM) || defined(__wasm__)
+    return 0u;
+#else
+    return reinterpret_cast<HandleT>(nullptr);
 #endif
 }
 
@@ -247,7 +256,7 @@ public:
 
 extern "C" {
 #if !defined(FFI_WASM) && !defined(__wasm__)
-FFI_EXPORT void luxonSetServerImports(const LuxonServerImports *imports) {
+void luxonSetServerImports(const LuxonServerImports *imports) {
     if (imports) {
         g_imports = *imports;
     } else {
@@ -309,31 +318,30 @@ template <size_t... Is> static server::auth_plugins::registry::AuthCallback get_
  * ============================================================================ */
 
 extern "C" {
-FFI_EXPORT bool luxonHasError() { return t_has_error; }
+bool luxonHasError() { return t_has_error; }
 
-FFI_EXPORT const char *luxonGetLastErrorType() { return t_last_error_type.c_str(); }
+const char *luxonGetLastErrorType() { return t_last_error_type.c_str(); }
 
-FFI_EXPORT const char *luxonGetLastErrorMessage() { return t_last_error_msg.c_str(); }
+const char *luxonGetLastErrorMessage() { return t_last_error_msg.c_str(); }
 
-FFI_EXPORT void luxonClearLastError() { clear_ffi_error(); }
+void luxonClearLastError() { clear_ffi_error(); }
 
 /* ============================================================================
  * SER MESSAGE INTERFACE IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT SerMessageHandle createSerMessage() {
-    return ffi_safe_call<SerMessageHandle>(wrap<SerMessageHandle>(static_cast<luxon::ser::Message *>(nullptr)),
-                                           [] { return wrap<SerMessageHandle>(new luxon::ser::Message()); });
+SerMessageHandle createSerMessage() {
+    return ffi_safe_call<SerMessageHandle>(wrap<SerMessageHandle>(nullptr), [] { return wrap<SerMessageHandle>(new luxon::ser::Message()); });
 }
 
-FFI_EXPORT void destroySerMessage(SerMessageHandle val) {
+void destroySerMessage(SerMessageHandle val) {
     ffi_safe_exec([=] {
         if (val)
             delete unwrap<luxon::ser::Message>(val);
     });
 }
 
-FFI_EXPORT bool serializeSerMessage(SerMessageHandle val, uint8_t *out_buf, ffi_size_t max_len, ffi_size_t *out_written) {
+bool serializeSerMessage(SerMessageHandle val, uint8_t *out_buf, ffi_size_t max_len, ffi_size_t *out_written) {
     if (!val || !out_buf || !out_written)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -349,7 +357,7 @@ FFI_EXPORT bool serializeSerMessage(SerMessageHandle val, uint8_t *out_buf, ffi_
     });
 }
 
-FFI_EXPORT bool deserializeSerMessage(const uint8_t *buf, ffi_size_t len, SerMessageHandle out_val) {
+bool deserializeSerMessage(const uint8_t *buf, ffi_size_t len, SerMessageHandle out_val) {
     if (!buf || !out_val)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -368,19 +376,18 @@ FFI_EXPORT bool deserializeSerMessage(const uint8_t *buf, ffi_size_t len, SerMes
  * SER VALUE INTERFACE IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT SerValueHandle createSerValue() {
-    return ffi_safe_call<SerValueHandle>(wrap<SerValueHandle>(static_cast<luxon::ser::Value *>(nullptr)),
-                                         [] { return wrap<SerValueHandle>(new luxon::ser::Value()); });
+SerValueHandle createSerValue() {
+    return ffi_safe_call<SerValueHandle>(wrap<SerValueHandle>(nullptr), [] { return wrap<SerValueHandle>(new luxon::ser::Value()); });
 }
 
-FFI_EXPORT void destroySerValue(SerValueHandle val) {
+void destroySerValue(SerValueHandle val) {
     ffi_safe_exec([=] {
         if (val)
             delete unwrap<luxon::ser::Value>(val);
     });
 }
 
-FFI_EXPORT bool serializeSerValue(SerValueHandle val, uint8_t *out_buf, ffi_size_t max_len, ffi_size_t *out_written) {
+bool serializeSerValue(SerValueHandle val, uint8_t *out_buf, ffi_size_t max_len, ffi_size_t *out_written) {
     if (!val || !out_buf || !out_written)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -398,7 +405,7 @@ FFI_EXPORT bool serializeSerValue(SerValueHandle val, uint8_t *out_buf, ffi_size
     });
 }
 
-FFI_EXPORT bool deserializeSerValue(const uint8_t *buf, ffi_size_t len, SerValueHandle out_val) {
+bool deserializeSerValue(const uint8_t *buf, ffi_size_t len, SerValueHandle out_val) {
     if (!buf || !out_val)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -418,10 +425,10 @@ FFI_EXPORT bool deserializeSerValue(const uint8_t *buf, ffi_size_t len, SerValue
  * LOGGER INTERFACE IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT LoggerHandle getOrCreateLogger(const char *name) {
+LoggerHandle getOrCreateLogger(const char *name) {
     if (!name)
-        return wrap<LoggerHandle>(static_cast<server::logger *>(nullptr));
-    return ffi_safe_call<LoggerHandle>(wrap<LoggerHandle>(static_cast<server::logger *>(nullptr)), [=] {
+        return wrap<LoggerHandle>(nullptr);
+    return ffi_safe_call<LoggerHandle>(wrap<LoggerHandle>(nullptr), [=] {
         std::lock_guard<std::mutex> lock(g_registry_mutex);
         std::string sname(name);
         auto it = g_logger_registry.find(sname);
@@ -433,7 +440,7 @@ FFI_EXPORT LoggerHandle getOrCreateLogger(const char *name) {
     });
 }
 
-FFI_EXPORT void setLoggerLevel(LoggerHandle logger, int32_t level) {
+void setLoggerLevel(LoggerHandle logger, int32_t level) {
     if (auto *l = unwrap<server::logger>(logger)) {
         ffi_safe_exec([=] {
 #ifdef LUXON_SERVER_USE_SPDLOG
@@ -446,7 +453,7 @@ FFI_EXPORT void setLoggerLevel(LoggerHandle logger, int32_t level) {
 }
 
 #define IMPL_LOG_METHOD(fn_name, lvl_method)                                                                                                                   \
-    FFI_EXPORT void fn_name(LoggerHandle logger, const char *message) {                                                                                        \
+    void fn_name(LoggerHandle logger, const char *message) {                                                                                                   \
         if (!message)                                                                                                                                          \
             return;                                                                                                                                            \
         if (auto *l = unwrap<server::logger>(logger)) {                                                                                                        \
@@ -465,21 +472,21 @@ IMPL_LOG_METHOD(loggerCritical, critical)
  * PEER INTERFACE IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT bool peerIsAuthenticated(PeerHandle peer) {
+bool peerIsAuthenticated(PeerHandle peer) {
     return ffi_safe_call<bool>(false, [=] {
         auto *p = unwrap<server::Peer>(peer);
         return p ? p->is_authenticated() : false;
     });
 }
 
-FFI_EXPORT LuxonServerProtocol peerGetTransportProtocol(PeerHandle peer) {
+LuxonServerProtocol peerGetTransportProtocol(PeerHandle peer) {
     return ffi_safe_call<LuxonServerProtocol>(LUXON_PROTOCOL_UDP, [=] {
         auto *p = unwrap<server::Peer>(peer);
         return p ? static_cast<LuxonServerProtocol>(p->transport_protocol) : LUXON_PROTOCOL_UDP;
     });
 }
 
-FFI_EXPORT void peerSend(PeerHandle peer, const uint8_t *payload, ffi_size_t length, uint8_t channel, LuxonDeliveryMode delivery_mode) {
+void peerSend(PeerHandle peer, const uint8_t *payload, ffi_size_t length, uint8_t channel, LuxonDeliveryMode delivery_mode) {
     if (!payload || length == 0)
         return;
     ffi_safe_exec([=] {
@@ -493,51 +500,64 @@ FFI_EXPORT void peerSend(PeerHandle peer, const uint8_t *payload, ffi_size_t len
     });
 }
 
-FFI_EXPORT void peerDisconnect(PeerHandle peer) {
+void peerDisconnect(PeerHandle peer) {
     ffi_safe_exec([=] {
         if (auto *p = unwrap<server::Peer>(peer))
             p->disconnect();
     });
 }
 
+const char *peerGetUserId(PeerHandle peer) {
+    if (auto *p = unwrap<server::Peer>(peer))
+        if (auto& pp = p->persistent)
+            return pp->user_id.c_str();
+    return nullptr;
+}
+
+GameHandle peerGetCurrentGame(PeerHandle peer) {
+    if (auto *p = unwrap<server::Peer>(peer))
+        if (auto& pp = p->persistent)
+            return wrap<GameHandle>(pp->current_game.get());
+    return wrap<GameHandle>(nullptr);
+}
+
 /* ============================================================================
  * GAME PEER INTERFACE IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT GamePeerHandle createGamePeerContainer() {
-    return ffi_safe_call<GamePeerHandle>(wrap<GamePeerHandle>(static_cast<server::GamePeer *>(nullptr)),
-                                         [] { return wrap<GamePeerHandle>(new server::GamePeer()); });
+GamePeerHandle createGamePeerContainer() {
+    return ffi_safe_call<GamePeerHandle>(wrap<GamePeerHandle>(nullptr), [] { return wrap<GamePeerHandle>(new server::GamePeer()); });
 }
 
-FFI_EXPORT void destroyGamePeerContainer(GamePeerHandle game_peer) {
+void destroyGamePeerContainer(GamePeerHandle game_peer) {
     ffi_safe_exec([=] {
         if (game_peer)
             delete unwrap<server::GamePeer>(game_peer);
     });
 }
 
-FFI_EXPORT bool gamePeerIsValid(GamePeerHandle game_peer) {
+bool gamePeerIsValid(GamePeerHandle game_peer) {
     return ffi_safe_call<bool>(false, [=] {
         auto *gp = unwrap<server::GamePeer>(game_peer);
         return gp ? gp->is_valid() : false;
     });
 }
 
-FFI_EXPORT int32_t gamePeerGetActorId(GamePeerHandle game_peer) {
+int32_t gamePeerGetActorId(GamePeerHandle game_peer) {
     return ffi_safe_call<int32_t>(0, [=] {
         auto *gp = unwrap<server::GamePeer>(game_peer);
         return gp ? gp->actor_id : 0;
     });
 }
 
-FFI_EXPORT bool gamePeerHasInterestGroup(GamePeerHandle game_peer, uint8_t group) {
+bool gamePeerHasInterestGroup(GamePeerHandle game_peer, uint8_t group) {
     return ffi_safe_call<bool>(false, [=] {
         auto *gp = unwrap<server::GamePeer>(game_peer);
         return gp ? gp->has_interest_group(group) : false;
     });
 }
 
-FFI_EXPORT void gamePeerSetInterestGroup(GamePeerHandle game_peer, uint8_t group, bool enable) {
+void gamePeerSetInterestGroup(GamePeerHandle game_peer, uint8_t group, bool enable) {
     ffi_safe_exec([=] {
         if (auto *gp = unwrap<server::GamePeer>(game_peer)) {
             gp->interest_groups.set(group, enable);
@@ -545,7 +565,7 @@ FFI_EXPORT void gamePeerSetInterestGroup(GamePeerHandle game_peer, uint8_t group
     });
 }
 
-FFI_EXPORT void gamePeerGetInterestGroupsMask(GamePeerHandle game_peer, uint32_t *out_mask_words, ffi_size_t max_words) {
+void gamePeerGetInterestGroupsMask(GamePeerHandle game_peer, uint32_t *out_mask_words, ffi_size_t max_words) {
     if (!out_mask_words || max_words == 0)
         return;
     ffi_safe_exec([=] {
@@ -565,7 +585,7 @@ FFI_EXPORT void gamePeerGetInterestGroupsMask(GamePeerHandle game_peer, uint32_t
     });
 }
 
-FFI_EXPORT void gamePeerSetInterestGroupsMask(GamePeerHandle game_peer, const uint32_t *mask_words, ffi_size_t word_count) {
+void gamePeerSetInterestGroupsMask(GamePeerHandle game_peer, const uint32_t *mask_words, ffi_size_t word_count) {
     if (!mask_words || word_count == 0)
         return;
     ffi_safe_exec([=] {
@@ -583,7 +603,7 @@ FFI_EXPORT void gamePeerSetInterestGroupsMask(GamePeerHandle game_peer, const ui
     });
 }
 
-FFI_EXPORT void gamePeerGetActorProps(GamePeerHandle game_peer, SerValueHandle out_props) {
+void gamePeerGetActorProps(GamePeerHandle game_peer, SerValueHandle out_props) {
     if (!out_props)
         return;
     ffi_safe_exec([=] {
@@ -593,7 +613,7 @@ FFI_EXPORT void gamePeerGetActorProps(GamePeerHandle game_peer, SerValueHandle o
     });
 }
 
-FFI_EXPORT void gamePeerSetActorProps(GamePeerHandle game_peer, SerValueHandle props) {
+void gamePeerSetActorProps(GamePeerHandle game_peer, SerValueHandle props) {
     if (!props)
         return;
     ffi_safe_exec([=] {
@@ -608,17 +628,17 @@ FFI_EXPORT void gamePeerSetActorProps(GamePeerHandle game_peer, SerValueHandle p
     });
 }
 
-FFI_EXPORT PeerHandle gamePeerGetBasePeer(GamePeerHandle game_peer) {
-    return ffi_safe_call<PeerHandle>(wrap<PeerHandle>(static_cast<server::Peer *>(nullptr)), [=] {
+PeerHandle gamePeerGetBasePeer(GamePeerHandle game_peer) {
+    return ffi_safe_call<PeerHandle>(wrap<PeerHandle>(nullptr), [=] {
         if (auto *gp = unwrap<server::GamePeer>(game_peer)) {
             if (auto sp = gp->peer.lock())
                 return wrap<PeerHandle>(sp.get());
         }
-        return wrap<PeerHandle>(static_cast<server::Peer *>(nullptr));
+        return wrap<PeerHandle>(nullptr);
     });
 }
 
-FFI_EXPORT bool gamePeerDisconnect(GamePeerHandle game_peer) {
+bool gamePeerDisconnect(GamePeerHandle game_peer) {
     return ffi_safe_call<bool>(false, [=] {
         auto *gp = unwrap<server::GamePeer>(game_peer);
         return gp ? gp->disconnect() : false;
@@ -629,19 +649,19 @@ FFI_EXPORT bool gamePeerDisconnect(GamePeerHandle game_peer) {
  * EVENT INTERFACE IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT EventHandle createEvent() {
-    return ffi_safe_call<EventHandle>(wrap<EventHandle>(static_cast<server::Event *>(nullptr)), [] { return wrap<EventHandle>(new server::Event()); });
+EventHandle createEvent() {
+    return ffi_safe_call<EventHandle>(wrap<EventHandle>(nullptr), [] { return wrap<EventHandle>(new server::Event()); });
 }
 
-FFI_EXPORT void destroyEvent(EventHandle event) {
+void destroyEvent(EventHandle event) {
     ffi_safe_exec([=] {
         if (event)
             delete unwrap<server::Event>(event);
     });
 }
 
-FFI_EXPORT void eventSetRoutingMetadata(EventHandle event, uint8_t code, int32_t sender_actor_id, LuxonDeliveryMode delivery_mode, uint8_t channel,
-                                        uint8_t interest_group) {
+void eventSetRoutingMetadata(EventHandle event, uint8_t code, int32_t sender_actor_id, LuxonDeliveryMode delivery_mode, uint8_t channel,
+                             uint8_t interest_group) {
     ffi_safe_exec([=] {
         if (auto *ev = unwrap<server::Event>(event)) {
             ev->code = code;
@@ -653,8 +673,8 @@ FFI_EXPORT void eventSetRoutingMetadata(EventHandle event, uint8_t code, int32_t
     });
 }
 
-FFI_EXPORT void eventGetRoutingMetadata(EventHandle event, uint8_t *out_code, int32_t *out_sender_id, LuxonDeliveryMode *out_mode, uint8_t *out_channel,
-                                        uint8_t *out_group) {
+void eventGetRoutingMetadata(EventHandle event, uint8_t *out_code, int32_t *out_sender_id, LuxonDeliveryMode *out_mode, uint8_t *out_channel,
+                             uint8_t *out_group) {
     ffi_safe_exec([=] {
         if (auto *ev = unwrap<server::Event>(event)) {
             if (out_code)
@@ -671,21 +691,21 @@ FFI_EXPORT void eventGetRoutingMetadata(EventHandle event, uint8_t *out_code, in
     });
 }
 
-FFI_EXPORT void eventSetReceiversAll(EventHandle event) {
+void eventSetReceiversAll(EventHandle event) {
     ffi_safe_exec([=] {
         if (auto *ev = unwrap<server::Event>(event))
             ev->receivers = std::monostate{};
     });
 }
 
-FFI_EXPORT void eventSetReceiversGroup(EventHandle event, uint8_t group) {
+void eventSetReceiversGroup(EventHandle event, uint8_t group) {
     ffi_safe_exec([=] {
         if (auto *ev = unwrap<server::Event>(event))
             ev->receivers = group;
     });
 }
 
-FFI_EXPORT void eventSetReceiversActors(EventHandle event, const int32_t *actor_ids, ffi_size_t count) {
+void eventSetReceiversActors(EventHandle event, const int32_t *actor_ids, ffi_size_t count) {
     if (!actor_ids && count > 0)
         return;
     ffi_safe_exec([=] {
@@ -696,7 +716,7 @@ FFI_EXPORT void eventSetReceiversActors(EventHandle event, const int32_t *actor_
     });
 }
 
-FFI_EXPORT LuxonEventReceiversType eventGetReceiversType(EventHandle event) {
+LuxonEventReceiversType eventGetReceiversType(EventHandle event) {
     return ffi_safe_call<LuxonEventReceiversType>(LUXON_RECEIVERS_ALL, [=] {
         if (auto *ev = unwrap<server::Event>(event)) {
             if (std::holds_alternative<uint8_t>(ev->receivers))
@@ -708,7 +728,7 @@ FFI_EXPORT LuxonEventReceiversType eventGetReceiversType(EventHandle event) {
     });
 }
 
-FFI_EXPORT uint8_t eventGetReceiversGroup(EventHandle event) {
+uint8_t eventGetReceiversGroup(EventHandle event) {
     return ffi_safe_call<uint8_t>(0, [=] -> uint8_t {
         if (auto *ev = unwrap<server::Event>(event)) {
             if (auto *g = std::get_if<uint8_t>(&ev->receivers))
@@ -718,7 +738,7 @@ FFI_EXPORT uint8_t eventGetReceiversGroup(EventHandle event) {
     });
 }
 
-FFI_EXPORT void eventGetReceiversActors(EventHandle event, int32_t *out_actor_ids, ffi_size_t max_count, ffi_size_t *out_written) {
+void eventGetReceiversActors(EventHandle event, int32_t *out_actor_ids, ffi_size_t max_count, ffi_size_t *out_written) {
     if (!out_written)
         return;
     *out_written = 0;
@@ -739,7 +759,7 @@ FFI_EXPORT void eventGetReceiversActors(EventHandle event, int32_t *out_actor_id
     });
 }
 
-FFI_EXPORT void eventSetData(EventHandle event, SerValueHandle data) {
+void eventSetData(EventHandle event, SerValueHandle data) {
     if (!data)
         return;
     ffi_safe_exec([=] {
@@ -749,7 +769,7 @@ FFI_EXPORT void eventSetData(EventHandle event, SerValueHandle data) {
     });
 }
 
-FFI_EXPORT void eventGetData(EventHandle event, SerValueHandle out_data) {
+void eventGetData(EventHandle event, SerValueHandle out_data) {
     if (!out_data)
         return;
     ffi_safe_exec([=] {
@@ -759,7 +779,7 @@ FFI_EXPORT void eventGetData(EventHandle event, SerValueHandle out_data) {
     });
 }
 
-FFI_EXPORT void eventSetTopParams(EventHandle event, SerValueHandle top_params) {
+void eventSetTopParams(EventHandle event, SerValueHandle top_params) {
     if (!top_params)
         return;
     ffi_safe_exec([=] {
@@ -772,7 +792,7 @@ FFI_EXPORT void eventSetTopParams(EventHandle event, SerValueHandle top_params) 
     });
 }
 
-FFI_EXPORT void eventGetTopParams(EventHandle event, SerValueHandle out_top_params) {
+void eventGetTopParams(EventHandle event, SerValueHandle out_top_params) {
     if (!out_top_params)
         return;
     ffi_safe_exec([=] {
@@ -786,7 +806,7 @@ FFI_EXPORT void eventGetTopParams(EventHandle event, SerValueHandle out_top_para
  * GAME INTERFACE IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT void gameGetId(GameHandle game, char *out_id, ffi_size_t max_len) {
+void gameGetId(GameHandle game, char *out_id, ffi_size_t max_len) {
     if (!out_id || max_len == 0)
         return;
     ffi_safe_exec([=] {
@@ -803,8 +823,8 @@ FFI_EXPORT void gameGetId(GameHandle game, char *out_id, ffi_size_t max_len) {
     }
 }
 
-FFI_EXPORT void gameGetConfigState(GameHandle game, uint8_t *out_flags, bool *out_is_created, bool *out_is_open, bool *out_is_visible, uint8_t *out_max_peers,
-                                   int32_t *out_master_actor) {
+void gameGetConfigState(GameHandle game, uint8_t *out_flags, bool *out_is_created, bool *out_is_open, bool *out_is_visible, uint8_t *out_max_peers,
+                        int32_t *out_master_actor) {
     ffi_safe_exec([=] {
         if (auto *g = unwrap<server::Game>(game)) {
             if (out_flags)
@@ -823,7 +843,7 @@ FFI_EXPORT void gameGetConfigState(GameHandle game, uint8_t *out_flags, bool *ou
     });
 }
 
-FFI_EXPORT void gameSetConfigState(GameHandle game, uint8_t flags, bool is_open, bool is_visible, uint8_t max_peers, int32_t master_actor) {
+void gameSetConfigState(GameHandle game, uint8_t flags, bool is_open, bool is_visible, uint8_t max_peers, int32_t master_actor) {
     ffi_safe_exec([=] {
         if (auto *g = unwrap<server::Game>(game)) {
             g->flags = flags;
@@ -835,42 +855,42 @@ FFI_EXPORT void gameSetConfigState(GameHandle game, uint8_t flags, bool is_open,
     });
 }
 
-FFI_EXPORT int32_t gameGetMasterActor(GameHandle game) {
+int32_t gameGetMasterActor(GameHandle game) {
     return ffi_safe_call<int32_t>(0, [=] {
         auto *g = unwrap<server::Game>(game);
         return g ? g->master_actor : 0;
     });
 }
 
-FFI_EXPORT void gameSetMasterActor(GameHandle game, int32_t actor_id) {
+void gameSetMasterActor(GameHandle game, int32_t actor_id) {
     ffi_safe_exec([=] {
         if (auto *g = unwrap<server::Game>(game))
             g->master_actor = actor_id;
     });
 }
 
-FFI_EXPORT int32_t gameGetLastActorId(GameHandle game) {
+int32_t gameGetLastActorId(GameHandle game) {
     return ffi_safe_call<int32_t>(0, [=] {
         auto *g = unwrap<server::Game>(game);
         return g ? g->last_actor_id : 0;
     });
 }
 
-FFI_EXPORT uint8_t gameGetMaxPeers(GameHandle game) {
+uint8_t gameGetMaxPeers(GameHandle game) {
     return ffi_safe_call<uint8_t>(0, [=] {
         auto *g = unwrap<server::Game>(game);
         return g ? g->max_peers : 0;
     });
 }
 
-FFI_EXPORT void gameSetMaxPeers(GameHandle game, uint8_t max_peers) {
+void gameSetMaxPeers(GameHandle game, uint8_t max_peers) {
     ffi_safe_exec([=] {
         if (auto *g = unwrap<server::Game>(game))
             g->max_peers = max_peers;
     });
 }
 
-FFI_EXPORT void gameGetTtlConfig(GameHandle game, int32_t *out_player_ttl, int32_t *out_empty_ttl) {
+void gameGetTtlConfig(GameHandle game, int32_t *out_player_ttl, int32_t *out_empty_ttl) {
     ffi_safe_exec([=] {
         if (auto *g = unwrap<server::Game>(game)) {
             if (out_player_ttl)
@@ -881,7 +901,7 @@ FFI_EXPORT void gameGetTtlConfig(GameHandle game, int32_t *out_player_ttl, int32
     });
 }
 
-FFI_EXPORT void gameSetTtlConfig(GameHandle game, int32_t player_ttl, int32_t empty_ttl) {
+void gameSetTtlConfig(GameHandle game, int32_t player_ttl, int32_t empty_ttl) {
     ffi_safe_exec([=] {
         if (auto *g = unwrap<server::Game>(game)) {
             g->player_ttl = player_ttl;
@@ -890,7 +910,7 @@ FFI_EXPORT void gameSetTtlConfig(GameHandle game, int32_t player_ttl, int32_t em
     });
 }
 
-FFI_EXPORT void gameGetCustomProps(GameHandle game, SerValueHandle out_custom_props) {
+void gameGetCustomProps(GameHandle game, SerValueHandle out_custom_props) {
     if (!out_custom_props)
         return;
     ffi_safe_exec([=] {
@@ -900,7 +920,7 @@ FFI_EXPORT void gameGetCustomProps(GameHandle game, SerValueHandle out_custom_pr
     });
 }
 
-FFI_EXPORT void gameSetCustomProps(GameHandle game, SerValueHandle custom_props) {
+void gameSetCustomProps(GameHandle game, SerValueHandle custom_props) {
     if (!custom_props)
         return;
     ffi_safe_exec([=] {
@@ -915,7 +935,7 @@ FFI_EXPORT void gameSetCustomProps(GameHandle game, SerValueHandle custom_props)
     });
 }
 
-FFI_EXPORT void gameGetLobbyPropsToSerValue(GameHandle game, SerValueHandle out_keys_array) {
+void gameGetLobbyPropsToSerValue(GameHandle game, SerValueHandle out_keys_array) {
     if (!out_keys_array)
         return;
     ffi_safe_exec([=] {
@@ -925,7 +945,7 @@ FFI_EXPORT void gameGetLobbyPropsToSerValue(GameHandle game, SerValueHandle out_
     });
 }
 
-FFI_EXPORT void gameSetLobbyPropsFromSerValue(GameHandle game, SerValueHandle keys_array) {
+void gameSetLobbyPropsFromSerValue(GameHandle game, SerValueHandle keys_array) {
     if (!keys_array)
         return;
     ffi_safe_exec([=] {
@@ -938,7 +958,7 @@ FFI_EXPORT void gameSetLobbyPropsFromSerValue(GameHandle game, SerValueHandle ke
     });
 }
 
-FFI_EXPORT void gameGetExpectedUsersToSerValue(GameHandle game, SerValueHandle out_list) {
+void gameGetExpectedUsersToSerValue(GameHandle game, SerValueHandle out_list) {
     if (!out_list)
         return;
     ffi_safe_exec([=] {
@@ -949,7 +969,7 @@ FFI_EXPORT void gameGetExpectedUsersToSerValue(GameHandle game, SerValueHandle o
     });
 }
 
-FFI_EXPORT void gameSetExpectedUsersFromSerValue(GameHandle game, SerValueHandle list) {
+void gameSetExpectedUsersFromSerValue(GameHandle game, SerValueHandle list) {
     if (!list)
         return;
     ffi_safe_exec([=] {
@@ -963,7 +983,7 @@ FFI_EXPORT void gameSetExpectedUsersFromSerValue(GameHandle game, SerValueHandle
     });
 }
 
-FFI_EXPORT void gameAddExpectedUser(GameHandle game, const char *user_id) {
+void gameAddExpectedUser(GameHandle game, const char *user_id) {
     if (!user_id)
         return;
     ffi_safe_exec([=] {
@@ -972,7 +992,7 @@ FFI_EXPORT void gameAddExpectedUser(GameHandle game, const char *user_id) {
     });
 }
 
-FFI_EXPORT void gameRemoveExpectedUser(GameHandle game, const char *user_id) {
+void gameRemoveExpectedUser(GameHandle game, const char *user_id) {
     if (!user_id)
         return;
     ffi_safe_exec([=] {
@@ -981,31 +1001,31 @@ FFI_EXPORT void gameRemoveExpectedUser(GameHandle game, const char *user_id) {
     });
 }
 
-FFI_EXPORT ffi_size_t gameGetPeerCount(GameHandle game) {
+ffi_size_t gameGetPeerCount(GameHandle game) {
     return ffi_safe_call<ffi_size_t>(0, [=] {
         auto *g = unwrap<server::Game>(game);
         return g ? static_cast<ffi_size_t>(g->peers.size()) : 0;
     });
 }
 
-FFI_EXPORT GamePeerHandle gameCreatePeer(GameHandle game, PeerHandle peer) {
-    return ffi_safe_call<GamePeerHandle>(wrap<GamePeerHandle>(static_cast<server::GamePeer *>(nullptr)), [=] {
+GamePeerHandle gameCreatePeer(GameHandle game, PeerHandle peer) {
+    return ffi_safe_call<GamePeerHandle>(wrap<GamePeerHandle>(nullptr), [=] {
         auto *g = unwrap<server::Game>(game);
         auto *p = unwrap<server::Peer>(peer);
         if (!g || !p)
-            return wrap<GamePeerHandle>(static_cast<server::GamePeer *>(nullptr));
+            return wrap<GamePeerHandle>(nullptr);
 
         std::shared_ptr<server::Peer> sp(p, [](server::Peer *) {});
         return wrap<GamePeerHandle>(new server::GamePeer(g->create_peer(sp)));
     });
 }
 
-FFI_EXPORT GamePeerHandle gameAddPeer(GameHandle game, GamePeerHandle game_peer) {
-    return ffi_safe_call<GamePeerHandle>(wrap<GamePeerHandle>(static_cast<server::GamePeer *>(nullptr)), [=] {
+GamePeerHandle gameAddPeer(GameHandle game, GamePeerHandle game_peer) {
+    return ffi_safe_call<GamePeerHandle>(wrap<GamePeerHandle>(nullptr), [=] {
         auto *g = unwrap<server::Game>(game);
         auto *gp_heap = unwrap<server::GamePeer>(game_peer);
         if (!g || !gp_heap)
-            return wrap<GamePeerHandle>(static_cast<server::GamePeer *>(nullptr));
+            return wrap<GamePeerHandle>(nullptr);
 
         server::GamePeer *persistent_slot = g->add_peer(std::move(*gp_heap));
         delete gp_heap;
@@ -1013,7 +1033,7 @@ FFI_EXPORT GamePeerHandle gameAddPeer(GameHandle game, GamePeerHandle game_peer)
     });
 }
 
-FFI_EXPORT bool gameRemovePeer(GameHandle game, PeerHandle peer) {
+bool gameRemovePeer(GameHandle game, PeerHandle peer) {
     return ffi_safe_call<bool>(false, [=] {
         auto *g = unwrap<server::Game>(game);
         auto *p = unwrap<server::Peer>(peer);
@@ -1025,7 +1045,7 @@ FFI_EXPORT bool gameRemovePeer(GameHandle game, PeerHandle peer) {
     });
 }
 
-FFI_EXPORT bool gameFloodPeer(GameHandle game, GamePeerHandle game_peer) {
+bool gameFloodPeer(GameHandle game, GamePeerHandle game_peer) {
     return ffi_safe_call<bool>(false, [=] {
         auto *g = unwrap<server::Game>(game);
         auto *gp = unwrap<server::GamePeer>(game_peer);
@@ -1033,26 +1053,26 @@ FFI_EXPORT bool gameFloodPeer(GameHandle game, GamePeerHandle game_peer) {
     });
 }
 
-FFI_EXPORT GamePeerHandle gameFindPeerByActorId(GameHandle game, int32_t actor_id) {
-    return ffi_safe_call<GamePeerHandle>(wrap<GamePeerHandle>(static_cast<server::GamePeer *>(nullptr)), [=] {
+GamePeerHandle gameFindPeerByActorId(GameHandle game, int32_t actor_id) {
+    return ffi_safe_call<GamePeerHandle>(wrap<GamePeerHandle>(nullptr), [=] {
         auto *g = unwrap<server::Game>(game);
-        return g ? wrap<GamePeerHandle>(g->find_peer(actor_id)) : wrap<GamePeerHandle>(static_cast<server::GamePeer *>(nullptr));
+        return g ? wrap<GamePeerHandle>(g->find_peer(actor_id)) : wrap<GamePeerHandle>(nullptr);
     });
 }
 
-FFI_EXPORT GamePeerHandle gameFindPeerByBasePeer(GameHandle game, PeerHandle peer) {
-    return ffi_safe_call<GamePeerHandle>(wrap<GamePeerHandle>(static_cast<server::GamePeer *>(nullptr)), [=] {
+GamePeerHandle gameFindPeerByBasePeer(GameHandle game, PeerHandle peer) {
+    return ffi_safe_call<GamePeerHandle>(wrap<GamePeerHandle>(nullptr), [=] {
         auto *g = unwrap<server::Game>(game);
         auto *p = unwrap<server::Peer>(peer);
         if (!g || !p)
-            return wrap<GamePeerHandle>(static_cast<server::GamePeer *>(nullptr));
+            return wrap<GamePeerHandle>(nullptr);
 
         std::shared_ptr<server::Peer> sp(p, [](server::Peer *) {});
         return wrap<GamePeerHandle>(g->find_peer(sp));
     });
 }
 
-FFI_EXPORT void gameBroadcastEvent(GameHandle game, EventHandle event) {
+void gameBroadcastEvent(GameHandle game, EventHandle event) {
     ffi_safe_exec([=] {
         auto *g = unwrap<server::Game>(game);
         auto *ev = unwrap<server::Event>(event);
@@ -1061,8 +1081,8 @@ FFI_EXPORT void gameBroadcastEvent(GameHandle game, EventHandle event) {
     });
 }
 
-FFI_EXPORT bool gameValidateJoin(GameHandle game, const char *user_id, ffi_size_t new_expected_users_count, int16_t *out_err_code, char *out_err_str,
-                                 ffi_size_t max_err_len) {
+bool gameValidateJoin(GameHandle game, const char *user_id, ffi_size_t new_expected_users_count, int16_t *out_err_code, char *out_err_str,
+                      ffi_size_t max_err_len) {
     if (!user_id)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -1088,14 +1108,14 @@ FFI_EXPORT bool gameValidateJoin(GameHandle game, const char *user_id, ffi_size_
     });
 }
 
-FFI_EXPORT void gameTriggerLobbyUpdate(GameHandle game) {
+void gameTriggerLobbyUpdate(GameHandle game) {
     ffi_safe_exec([=] {
         if (auto *g = unwrap<server::Game>(game))
             g->trigger_lobby_update();
     });
 }
 
-FFI_EXPORT void gameGetGameProp(GameHandle game, SerValueHandle key, SerValueHandle out_val) {
+void gameGetGameProp(GameHandle game, SerValueHandle key, SerValueHandle out_val) {
     if (!key || !out_val)
         return;
     ffi_safe_exec([=] {
@@ -1105,7 +1125,7 @@ FFI_EXPORT void gameGetGameProp(GameHandle game, SerValueHandle key, SerValueHan
     });
 }
 
-FFI_EXPORT void gameGetLobbyGameProps(GameHandle game, SerValueHandle out_hashtable) {
+void gameGetLobbyGameProps(GameHandle game, SerValueHandle out_hashtable) {
     if (!out_hashtable)
         return;
     ffi_safe_exec([=] {
@@ -1115,7 +1135,7 @@ FFI_EXPORT void gameGetLobbyGameProps(GameHandle game, SerValueHandle out_hashta
     });
 }
 
-FFI_EXPORT void gameGetGameProps(GameHandle game, bool no_custom, SerValueHandle out_hashtable) {
+void gameGetGameProps(GameHandle game, bool no_custom, SerValueHandle out_hashtable) {
     if (!out_hashtable)
         return;
     ffi_safe_exec([=] {
@@ -1125,7 +1145,7 @@ FFI_EXPORT void gameGetGameProps(GameHandle game, bool no_custom, SerValueHandle
     });
 }
 
-FFI_EXPORT void gameGetActorProps(GameHandle game, SerValueHandle out_hashtable) {
+void gameGetActorProps(GameHandle game, SerValueHandle out_hashtable) {
     if (!out_hashtable)
         return;
     ffi_safe_exec([=] {
@@ -1135,7 +1155,7 @@ FFI_EXPORT void gameGetActorProps(GameHandle game, SerValueHandle out_hashtable)
     });
 }
 
-FFI_EXPORT void gameInsertGameProps(GameHandle game, SerValueHandle update) {
+void gameInsertGameProps(GameHandle game, SerValueHandle update) {
     if (!update)
         return;
     ffi_safe_exec([=] {
@@ -1150,7 +1170,7 @@ FFI_EXPORT void gameInsertGameProps(GameHandle game, SerValueHandle update) {
     });
 }
 
-FFI_EXPORT bool gameExpectGameProps(GameHandle game, SerValueHandle expected) {
+bool gameExpectGameProps(GameHandle game, SerValueHandle expected) {
     if (!expected)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -1165,7 +1185,7 @@ FFI_EXPORT bool gameExpectGameProps(GameHandle game, SerValueHandle expected) {
     });
 }
 
-FFI_EXPORT bool gameInsertActorProps(GameHandle game, int32_t actor_id, SerValueHandle update) {
+bool gameInsertActorProps(GameHandle game, int32_t actor_id, SerValueHandle update) {
     if (!update)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -1180,7 +1200,7 @@ FFI_EXPORT bool gameInsertActorProps(GameHandle game, int32_t actor_id, SerValue
     });
 }
 
-FFI_EXPORT bool gameExpectActorProps(GameHandle game, int32_t actor_id, SerValueHandle expected) {
+bool gameExpectActorProps(GameHandle game, int32_t actor_id, SerValueHandle expected) {
     if (!expected)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -1195,7 +1215,7 @@ FFI_EXPORT bool gameExpectActorProps(GameHandle game, int32_t actor_id, SerValue
     });
 }
 
-FFI_EXPORT bool gameMatchesFilter(SerValueHandle event_data, SerValueHandle filter) {
+bool gameMatchesFilter(SerValueHandle event_data, SerValueHandle filter) {
     if (!event_data || !filter)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -1214,27 +1234,26 @@ FFI_EXPORT bool gameMatchesFilter(SerValueHandle event_data, SerValueHandle filt
  * LOBBY INTERFACE IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT LobbyHandle createLobby(const char *name, uint8_t type) {
+LobbyHandle createLobby(const char *name, uint8_t type) {
     if (!name)
-        return wrap<LobbyHandle>(static_cast<server::Lobby *>(nullptr));
-    return ffi_safe_call<LobbyHandle>(wrap<LobbyHandle>(static_cast<server::Lobby *>(nullptr)),
-                                      [=] { return wrap<LobbyHandle>(new server::Lobby(nullptr, name, type)); });
+        return wrap<LobbyHandle>(nullptr);
+    return ffi_safe_call<LobbyHandle>(wrap<LobbyHandle>(nullptr), [=] { return wrap<LobbyHandle>(new server::Lobby(nullptr, name, type)); });
 }
 
-FFI_EXPORT void destroyLobby(LobbyHandle lobby) {
+void destroyLobby(LobbyHandle lobby) {
     ffi_safe_exec([=] {
         if (lobby)
             delete unwrap<server::Lobby>(lobby);
     });
 }
 
-FFI_EXPORT GameHandle lobbyCreateGame(LobbyHandle lobby, const char *id, bool or_get, SerValueHandle out_err_resp) {
+GameHandle lobbyCreateGame(LobbyHandle lobby, const char *id, bool or_get, SerValueHandle out_err_resp) {
     if (!id)
-        return wrap<GameHandle>(static_cast<server::Game *>(nullptr));
-    return ffi_safe_call<GameHandle>(wrap<GameHandle>(static_cast<server::Game *>(nullptr)), [=] {
+        return wrap<GameHandle>(nullptr);
+    return ffi_safe_call<GameHandle>(wrap<GameHandle>(nullptr), [=] {
         auto *l = unwrap<server::Lobby>(lobby);
         if (!l)
-            return wrap<GameHandle>(static_cast<server::Game *>(nullptr));
+            return wrap<GameHandle>(nullptr);
 
         auto res = l->create_game(id, or_get);
         if (res.has_value()) {
@@ -1242,26 +1261,26 @@ FFI_EXPORT GameHandle lobbyCreateGame(LobbyHandle lobby, const char *id, bool or
         } else {
             if (out_err_resp)
                 *unwrap<luxon::ser::Value>(out_err_resp) = res.error();
-            return wrap<GameHandle>(static_cast<server::Game *>(nullptr));
+            return wrap<GameHandle>(nullptr);
         }
     });
 }
 
-FFI_EXPORT ffi_size_t lobbyGetPeerCount(LobbyHandle lobby) {
+ffi_size_t lobbyGetPeerCount(LobbyHandle lobby) {
     return ffi_safe_call<ffi_size_t>(0, [=] {
         auto *l = unwrap<server::Lobby>(lobby);
         return l ? static_cast<ffi_size_t>(l->get_peer_count()) : 0;
     });
 }
 
-FFI_EXPORT ffi_size_t lobbyGetMasterPeerCount(LobbyHandle lobby) {
+ffi_size_t lobbyGetMasterPeerCount(LobbyHandle lobby) {
     return ffi_safe_call<ffi_size_t>(0, [=] {
         auto *l = unwrap<server::Lobby>(lobby);
         return l ? static_cast<ffi_size_t>(l->get_master_peer_count()) : 0;
     });
 }
 
-FFI_EXPORT bool lobbyQueryLobbies(LobbyHandle lobby, const char *sql_queries, char *out_buf, ffi_size_t max_len, ffi_size_t *out_written) {
+bool lobbyQueryLobbies(LobbyHandle lobby, const char *sql_queries, char *out_buf, ffi_size_t max_len, ffi_size_t *out_written) {
     if (!sql_queries || !out_buf || !out_written)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -1291,37 +1310,37 @@ FFI_EXPORT bool lobbyQueryLobbies(LobbyHandle lobby, const char *sql_queries, ch
  * SERVER MANAGER CONFIG BUILDER IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT ServerManagerConfigHandle createServerManagerConfig() {
-    return ffi_safe_call<ServerManagerConfigHandle>(wrap<ServerManagerConfigHandle>(static_cast<server::ServerManagerConfig *>(nullptr)),
+ServerManagerConfigHandle createServerManagerConfig() {
+    return ffi_safe_call<ServerManagerConfigHandle>(wrap<ServerManagerConfigHandle>(nullptr),
                                                     [] { return wrap<ServerManagerConfigHandle>(new server::ServerManagerConfig()); });
 }
 
-FFI_EXPORT void destroyServerManagerConfig(ServerManagerConfigHandle config) {
+void destroyServerManagerConfig(ServerManagerConfigHandle config) {
     ffi_safe_exec([=] {
         if (config)
             delete unwrap<server::ServerManagerConfig>(config);
     });
 }
 
-FFI_EXPORT ServerManagerConfigHandle loadServerManagerConfigFromFile(const char *config_file_path) {
+ServerManagerConfigHandle loadServerManagerConfigFromFile(const char *config_file_path) {
     if (!config_file_path)
-        return wrap<ServerManagerConfigHandle>(static_cast<server::ServerManagerConfig *>(nullptr));
-    return ffi_safe_call<ServerManagerConfigHandle>(wrap<ServerManagerConfigHandle>(static_cast<server::ServerManagerConfig *>(nullptr)), [=] {
+        return wrap<ServerManagerConfigHandle>(nullptr);
+    return ffi_safe_call<ServerManagerConfigHandle>(wrap<ServerManagerConfigHandle>(nullptr), [=] {
         auto cfg = server::ServerManager::load_config_from_file(config_file_path);
         return wrap<ServerManagerConfigHandle>(new server::ServerManagerConfig(std::move(cfg)));
     });
 }
 
-FFI_EXPORT ServerManagerConfigHandle parseServerManagerConfig(const char *yaml_config_contents) {
+ServerManagerConfigHandle parseServerManagerConfig(const char *yaml_config_contents) {
     if (!yaml_config_contents)
-        return wrap<ServerManagerConfigHandle>(static_cast<server::ServerManagerConfig *>(nullptr));
-    return ffi_safe_call<ServerManagerConfigHandle>(wrap<ServerManagerConfigHandle>(static_cast<server::ServerManagerConfig *>(nullptr)), [=] {
+        return wrap<ServerManagerConfigHandle>(nullptr);
+    return ffi_safe_call<ServerManagerConfigHandle>(wrap<ServerManagerConfigHandle>(nullptr), [=] {
         auto cfg = server::ServerManager::parse_config(yaml_config_contents);
         return wrap<ServerManagerConfigHandle>(new server::ServerManagerConfig(std::move(cfg)));
     });
 }
 
-FFI_EXPORT void serverManagerConfigAddServer(ServerManagerConfigHandle config, LuxonServerType type, uint16_t port) {
+void serverManagerConfigAddServer(ServerManagerConfigHandle config, LuxonServerType type, uint16_t port) {
     ffi_safe_exec([=] {
         if (auto *c = unwrap<server::ServerManagerConfig>(config)) {
             c->add_server(static_cast<server::ServerType>(type), port);
@@ -1329,7 +1348,7 @@ FFI_EXPORT void serverManagerConfigAddServer(ServerManagerConfigHandle config, L
     });
 }
 
-FFI_EXPORT void serverManagerConfigAddServerWithUdp(ServerManagerConfigHandle config, LuxonServerType type, uint16_t port, const char *external_udp_address) {
+void serverManagerConfigAddServerWithUdp(ServerManagerConfigHandle config, LuxonServerType type, uint16_t port, const char *external_udp_address) {
     if (!external_udp_address)
         return;
     ffi_safe_exec([=] {
@@ -1339,7 +1358,7 @@ FFI_EXPORT void serverManagerConfigAddServerWithUdp(ServerManagerConfigHandle co
     });
 }
 
-FFI_EXPORT void serverManagerConfigAddEndpoint(ServerManagerConfigHandle config, LuxonServerType type, LuxonServerProtocol protocol, const char *address) {
+void serverManagerConfigAddEndpoint(ServerManagerConfigHandle config, LuxonServerType type, LuxonServerProtocol protocol, const char *address) {
     if (!address)
         return;
     ffi_safe_exec([=] {
@@ -1349,8 +1368,8 @@ FFI_EXPORT void serverManagerConfigAddEndpoint(ServerManagerConfigHandle config,
     });
 }
 
-FFI_EXPORT void serverManagerConfigSetLimits(ServerManagerConfigHandle config, bool enable_ipv6, unsigned max_connections, unsigned max_game_peers,
-                                             uint32_t tick_time_budget) {
+void serverManagerConfigSetLimits(ServerManagerConfigHandle config, bool enable_ipv6, unsigned max_connections, unsigned max_game_peers,
+                                  uint32_t tick_time_budget) {
     ffi_safe_exec([=] {
         if (auto *c = unwrap<server::ServerManagerConfig>(config)) {
             c->enable_ipv6 = enable_ipv6;
@@ -1361,7 +1380,7 @@ FFI_EXPORT void serverManagerConfigSetLimits(ServerManagerConfigHandle config, b
     });
 }
 
-FFI_EXPORT void serverManagerConfigSetSettingsDatabasePath(ServerManagerConfigHandle config, const char *path) {
+void serverManagerConfigSetSettingsDatabasePath(ServerManagerConfigHandle config, const char *path) {
     ffi_safe_exec([=] {
         if (auto *c = unwrap<server::ServerManagerConfig>(config)) {
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
@@ -1371,7 +1390,7 @@ FFI_EXPORT void serverManagerConfigSetSettingsDatabasePath(ServerManagerConfigHa
     });
 }
 
-FFI_EXPORT void serverManagerConfigEnableHttp(ServerManagerConfigHandle config, const char *address, uint16_t port) {
+void serverManagerConfigEnableHttp(ServerManagerConfigHandle config, const char *address, uint16_t port) {
     ffi_safe_exec([=] {
         if (auto *c = unwrap<server::ServerManagerConfig>(config)) {
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
@@ -1381,7 +1400,7 @@ FFI_EXPORT void serverManagerConfigEnableHttp(ServerManagerConfigHandle config, 
     });
 }
 
-FFI_EXPORT void serverManagerConfigDisableHttp(ServerManagerConfigHandle config) {
+void serverManagerConfigDisableHttp(ServerManagerConfigHandle config) {
     ffi_safe_exec([=] {
         if (auto *c = unwrap<server::ServerManagerConfig>(config)) {
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
@@ -1395,63 +1414,63 @@ FFI_EXPORT void serverManagerConfigDisableHttp(ServerManagerConfigHandle config)
  * SERVER MANAGER INTERFACE IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT ServerManagerHandle createServerManagerFromConfig(ServerManagerConfigHandle config) {
-    return ffi_safe_call<ServerManagerHandle>(wrap<ServerManagerHandle>(static_cast<server::ServerManager *>(nullptr)), [=] {
+ServerManagerHandle createServerManagerFromConfig(ServerManagerConfigHandle config) {
+    return ffi_safe_call<ServerManagerHandle>(wrap<ServerManagerHandle>(nullptr), [=] {
         auto *c = unwrap<server::ServerManagerConfig>(config);
         if (!c)
-            return wrap<ServerManagerHandle>(static_cast<server::ServerManager *>(nullptr));
+            return wrap<ServerManagerHandle>(nullptr);
         auto *manager = new server::ServerManager(std::move(*c));
         delete c;
         return wrap<ServerManagerHandle>(manager);
     });
 }
 
-FFI_EXPORT ServerManagerHandle createServerManagerFromFile(const char *config_file_path) {
+ServerManagerHandle createServerManagerFromFile(const char *config_file_path) {
     if (!config_file_path)
-        return wrap<ServerManagerHandle>(static_cast<server::ServerManager *>(nullptr));
-    return ffi_safe_call<ServerManagerHandle>(wrap<ServerManagerHandle>(static_cast<server::ServerManager *>(nullptr)),
+        return wrap<ServerManagerHandle>(nullptr);
+    return ffi_safe_call<ServerManagerHandle>(wrap<ServerManagerHandle>(nullptr),
                                               [=] { return wrap<ServerManagerHandle>(new server::ServerManager(config_file_path)); });
 }
 
-FFI_EXPORT ServerManagerHandle createServerManagerFromContents(const char *yaml_config_contents) {
+ServerManagerHandle createServerManagerFromContents(const char *yaml_config_contents) {
     if (!yaml_config_contents)
-        return wrap<ServerManagerHandle>(static_cast<server::ServerManager *>(nullptr));
-    return ffi_safe_call<ServerManagerHandle>(wrap<ServerManagerHandle>(static_cast<server::ServerManager *>(nullptr)), [=] {
+        return wrap<ServerManagerHandle>(nullptr);
+    return ffi_safe_call<ServerManagerHandle>(wrap<ServerManagerHandle>(nullptr), [=] {
         auto cfg = server::ServerManager::parse_config(yaml_config_contents);
         return wrap<ServerManagerHandle>(new server::ServerManager(std::move(cfg)));
     });
 }
 
-FFI_EXPORT void destroyServerManager(ServerManagerHandle manager) {
+void destroyServerManager(ServerManagerHandle manager) {
     ffi_safe_exec([=] {
         if (manager)
             delete unwrap<server::ServerManager>(manager);
     });
 }
 
-FFI_EXPORT void serverManagerRun(ServerManagerHandle manager) {
+void serverManagerRun(ServerManagerHandle manager) {
     ffi_safe_exec([=] {
         if (auto *m = unwrap<server::ServerManager>(manager))
             m->run();
     });
 }
 
-FFI_EXPORT bool serverManagerRunOnce(ServerManagerHandle manager) {
+bool serverManagerRunOnce(ServerManagerHandle manager) {
     return ffi_safe_call<bool>(false, [=] {
         auto *m = unwrap<server::ServerManager>(manager);
         return m ? m->run_once() : false;
     });
 }
 
-FFI_EXPORT void serverManagerStop(ServerManagerHandle manager) {
+void serverManagerStop(ServerManagerHandle manager) {
     ffi_safe_exec([=] {
         if (auto *m = unwrap<server::ServerManager>(manager))
             m->stop();
     });
 }
 
-FFI_EXPORT bool serverManagerGetEndpointOf(ServerManagerHandle manager, LuxonServerType server_type, LuxonServerProtocol server_proto, char *out_address,
-                                           ffi_size_t max_len) {
+bool serverManagerGetEndpointOf(ServerManagerHandle manager, LuxonServerType server_type, LuxonServerProtocol server_proto, char *out_address,
+                                ffi_size_t max_len) {
     if (!out_address || max_len == 0)
         return false;
     return ffi_safe_call<bool>(false, [=] {
@@ -1469,21 +1488,21 @@ FFI_EXPORT bool serverManagerGetEndpointOf(ServerManagerHandle manager, LuxonSer
     });
 }
 
-FFI_EXPORT ffi_size_t serverManagerGetConnectionCount(ServerManagerHandle manager) {
+ffi_size_t serverManagerGetConnectionCount(ServerManagerHandle manager) {
     return ffi_safe_call<ffi_size_t>(0, [=] {
         auto *m = unwrap<server::ServerManager>(manager);
         return m ? static_cast<ffi_size_t>(m->get_connection_count()) : 0;
     });
 }
 
-FFI_EXPORT unsigned serverManagerGetMaxConnections(ServerManagerHandle manager) {
+unsigned serverManagerGetMaxConnections(ServerManagerHandle manager) {
     return ffi_safe_call<unsigned>(0, [=] {
         auto *m = unwrap<server::ServerManager>(manager);
         return m ? m->get_max_connections() : 0;
     });
 }
 
-FFI_EXPORT uint8_t serverManagerGetMaxGamePeers(ServerManagerHandle manager) {
+uint8_t serverManagerGetMaxGamePeers(ServerManagerHandle manager) {
     return ffi_safe_call<uint8_t>(0, [=] {
         auto *m = unwrap<server::ServerManager>(manager);
         return m ? m->get_max_game_peers() : 0;
@@ -1494,7 +1513,7 @@ FFI_EXPORT uint8_t serverManagerGetMaxGamePeers(ServerManagerHandle manager) {
  * PLUGINS & HOOKPOINTS REGISTRATION IMPLEMENTATION
  * ============================================================================ */
 
-FFI_EXPORT uint32_t registerGamePlugin(const char *plugin_name) {
+uint32_t registerGamePlugin(const char *plugin_name) {
     if (!plugin_name)
         return 0;
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
@@ -1510,7 +1529,7 @@ FFI_EXPORT uint32_t registerGamePlugin(const char *plugin_name) {
 #endif
 }
 
-FFI_EXPORT bool registerAuthPlugin(unsigned type) {
+bool registerAuthPlugin(unsigned type) {
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
     return ffi_safe_call<bool>(false, [=] {
         // Instantiate static non-capturing thunks for provider types 0 through 63
@@ -1526,7 +1545,7 @@ FFI_EXPORT bool registerAuthPlugin(unsigned type) {
 #endif
 }
 
-FFI_EXPORT void registerHookpoints(ServerManagerHandle manager) {
+void registerHookpoints(ServerManagerHandle manager) {
 #ifdef LUXON_SERVER_ENABLE_HOOKPOINTS
     ffi_safe_exec([=] {
         auto *m = unwrap<server::ServerManager>(manager);

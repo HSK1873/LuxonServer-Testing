@@ -10,7 +10,7 @@
 #endif
 
 #ifndef FFI_FUNCTION
-#define FFI_FUNCTION(ret, name, params, ...) FFI_EXPORT ret name params;
+#define FFI_FUNCTION(ret, name, params, ...) FFI_EXPORT(#name) ret name params;
 #endif
 
 /* ============================================================================
@@ -68,6 +68,8 @@ FFI_FUNCTION(LuxonServerProtocol, peerGetTransportProtocol, (PeerHandle peer), p
 FFI_FUNCTION(void, peerSend, (PeerHandle peer, const uint8_t *payload, ffi_size_t length, uint8_t channel, LuxonDeliveryMode delivery_mode), peer, payload,
              length, channel, delivery_mode)
 FFI_FUNCTION(void, peerDisconnect, (PeerHandle peer), peer)
+FFI_FUNCTION(const char *, peerGetUserId, (PeerHandle peer), peer)
+FFI_FUNCTION(GameHandle, peerGetCurrentGame, (PeerHandle peer), peer)
 
 /* --- GAME PEER INTERFACE --- */
 FFI_FUNCTION(GamePeerHandle, createGamePeerContainer, (), )
