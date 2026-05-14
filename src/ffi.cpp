@@ -9,7 +9,7 @@
 #include "luxon/server/lobby.hpp"
 #include "luxon/server/peer.hpp"
 #include "luxon/server/logger.hpp"
-#include "luxon/ser_interface.hpp"
+#include "luxon/ser_ipc_binary.hpp"
 #include "luxon/ser_types.hpp"
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
 #include "luxon/server/game_plugin_registry.hpp"
@@ -430,8 +430,8 @@ ByteArrayHandle serializeSerMessage(SerMessageHandle val) {
         return wrap<ByteArrayHandle>(nullptr);
     return ffi_safe_call<ByteArrayHandle>(false, [=] {
         auto *v = unwrap<luxon::ser::Message>(val);
-        auto proto = luxon::ser::IProtocol::make_ipc();
-        auto res = proto->Serialize(*v);
+        luxon::ser::IPCBinaryProtocol proto;
+        auto res = proto.Serialize(*v);
         if (!res.has_value())
             return wrap<ByteArrayHandle>(nullptr);
         return wrap<ByteArrayHandle>(new ByteArray(std::move(*res)));
@@ -442,8 +442,8 @@ bool deserializeSerMessage(const uint8_t *buf, ffi_size_t len, SerMessageHandle 
     if (!buf || !out_val)
         return false;
     return ffi_safe_call<bool>(false, [=] {
-        auto proto = luxon::ser::IProtocol::make_ipc();
-        auto res = proto->Deserialize(std::span<const uint8_t>{buf, len});
+        luxon::ser::IPCBinaryProtocol proto;
+        auto res = proto.Deserialize(std::span<const uint8_t>{buf, len});
         if (!res.has_value())
             return false;
 
