@@ -10,6 +10,7 @@
 #include "luxon/server/peer.hpp"
 #include "luxon/server/logger.hpp"
 #include "luxon/ser_interface.hpp"
+#include "luxon/ser_types.hpp"
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
 #include "luxon/server/game_plugin_registry.hpp"
 #include "luxon/server/game_plugin_base.hpp"
@@ -331,6 +332,66 @@ const char *luxonGetLastErrorMessage() { return t_last_error_msg.c_str(); }
 void luxonClearLastError() { clear_ffi_error(); }
 
 /* ============================================================================
+ * BYTE ARRAY IMPLEMENTATION
+ * ============================================================================ */
+
+using luxon::ser::ByteArray;
+
+ByteArrayHandle createByteArray() { return wrap<ByteArrayHandle>(new ByteArray); }
+
+void destroyByteArray(ByteArrayHandle val) {
+    if (val)
+        delete unwrap<ByteArray>(val);
+}
+
+ffi_size_t copyFromByteArray(ByteArrayHandle val, uint8_t *out_buf, ffi_size_t max_len) {
+    if (!val)
+        return 0;
+
+    auto *array = unwrap<ByteArray>(val);
+
+    ffi_size_t copy_len = std::min(static_cast<ffi_size_t>(array->size()), max_len);
+
+    std::span<uint8_t> out{out_buf, copy_len};
+    std::copy(array->begin(), array->begin() + copy_len, out.begin());
+
+    return copy_len;
+}
+
+void appendToByteArray(ByteArrayHandle val, const uint8_t *buf, ffi_size_t len) {
+    if (!val)
+        return;
+
+    auto *array = unwrap<ByteArray>(val);
+    std::span<const uint8_t> in_data{buf, len};
+
+    array->insert(array->end(), in_data.begin(), in_data.end());
+}
+
+void copyToByteArray(ByteArrayHandle val, const uint8_t *buf, ffi_size_t len) {
+    if (!val)
+        return;
+
+    auto *array = unwrap<ByteArray>(val);
+    std::span<const uint8_t> in_data{buf, len};
+
+    array->clear();
+    array->insert(array->end(), in_data.begin(), in_data.end());
+}
+
+ffi_size_t getByteArraySize(ByteArrayHandle val) {
+    if (auto *array = unwrap<ByteArray>(val))
+        return array->size();
+    return 0;
+}
+
+void *getByteArrayDataPtr(ByteArrayHandle val) {
+    if (auto *array = unwrap<ByteArray>(val))
+        return array->data();
+    return nullptr;
+}
+
+/* ============================================================================
  * SER MESSAGE INTERFACE IMPLEMENTATION
  * ============================================================================ */
 
@@ -345,19 +406,16 @@ void destroySerMessage(SerMessageHandle val) {
     });
 }
 
-bool serializeSerMessage(SerMessageHandle val, uint8_t *out_buf, ffi_size_t max_len, ffi_size_t *out_written) {
-    if (!val || !out_buf || !out_written)
-        return false;
-    return ffi_safe_call<bool>(false, [=] {
+ByteArrayHandle serializeSerMessage(SerMessageHandle val) {
+    if (!val)
+        return wrap<ByteArrayHandle>(nullptr);
+    return ffi_safe_call<ByteArrayHandle>(false, [=] {
         auto *v = unwrap<luxon::ser::Message>(val);
         auto proto = luxon::ser::IProtocol::make_ipc();
         auto res = proto->Serialize(*v);
-        if (!res.has_value() || res->size() > max_len)
-            return false;
-
-        std::memcpy(out_buf, res->data(), res->size());
-        *out_written = static_cast<ffi_size_t>(res->size());
-        return true;
+        if (!res.has_value())
+            return wrap<ByteArrayHandle>(nullptr);
+        return wrap<ByteArrayHandle>(new ByteArray(std::move(*res)));
     });
 }
 
@@ -376,6 +434,13 @@ bool deserializeSerMessage(const uint8_t *buf, ffi_size_t len, SerMessageHandle 
     });
 }
 
+bool deserializeSerMessageFromByteArray(ByteArrayHandle val, SerMessageHandle out_val) {
+    if (!val)
+        return false;
+    auto *array = unwrap<ByteArray>(val);
+    return deserializeSerMessage(array->data(), array->size(), out_val);
+}
+
 /* ============================================================================
  * SER VALUE INTERFACE IMPLEMENTATION
  * ============================================================================ */
@@ -391,21 +456,17 @@ void destroySerValue(SerValueHandle val) {
     });
 }
 
-bool serializeSerValue(SerValueHandle val, uint8_t *out_buf, ffi_size_t max_len, ffi_size_t *out_written) {
-    if (!val || !out_buf || !out_written)
-        return false;
-    return ffi_safe_call<bool>(false, [=] {
+ByteArrayHandle serializeSerValue(SerValueHandle val) {
+    if (!val)
+        return wrap<ByteArrayHandle>(nullptr);
+    return ffi_safe_call<ByteArrayHandle>(false, [=] {
         auto *v = unwrap<luxon::ser::Value>(val);
         auto proto = luxon::ser::IProtocol::make(1, 8);
         luxon::ser::ByteWriter writer;
         auto res = proto->EncodeValue(writer, *v);
-        const auto& bytes = writer.bytes();
-        if (!res.has_value() || bytes.size() > max_len)
-            return false;
-
-        std::memcpy(out_buf, bytes.data(), bytes.size());
-        *out_written = static_cast<ffi_size_t>(bytes.size());
-        return true;
+        if (!res.has_value())
+            return wrap<ByteArrayHandle>(nullptr);
+        return wrap<ByteArrayHandle>(new ByteArray(writer.take()));
     });
 }
 
@@ -423,6 +484,13 @@ bool deserializeSerValue(const uint8_t *buf, ffi_size_t len, SerValueHandle out_
         *target = *res;
         return false;
     });
+}
+
+bool deserializeSerValueFromByteArray(ByteArrayHandle val, SerValueHandle out_val) {
+    if (!val)
+        return false;
+    auto *array = unwrap<ByteArray>(val);
+    return deserializeSerValue(array->data(), array->size(), out_val);
 }
 
 /* ============================================================================

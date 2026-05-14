@@ -25,6 +25,7 @@ FFI_HANDLE_TYPE(PeerHandle)
 FFI_HANDLE_TYPE(GamePeerHandle)
 FFI_HANDLE_TYPE(EventHandle)
 FFI_HANDLE_TYPE(LoggerHandle)
+FFI_HANDLE_TYPE(ByteArrayHandle)
 FFI_HANDLE_TYPE(SerValueHandle)
 FFI_HANDLE_TYPE(SerMessageHandle)
 FFI_HANDLE_TYPE(HandlerBaseHandle)
@@ -39,18 +40,28 @@ FFI_FUNCTION(const char *, luxonGetLastErrorType, (), )
 FFI_FUNCTION(const char *, luxonGetLastErrorMessage, (), )
 FFI_FUNCTION(void, luxonClearLastError, (), )
 
+/* --- BYTE ARRAY INTERFACE --- */
+FFI_FUNCTION(ByteArrayHandle, createByteArray, (), )
+FFI_FUNCTION(void, destroyByteArray, (ByteArrayHandle val), val)
+FFI_FUNCTION(ffi_size_t, copyFromByteArray, (ByteArrayHandle val, uint8_t *out_buf, ffi_size_t max_len), val, out_buf, max_len)
+FFI_FUNCTION(void, appendToByteArray, (ByteArrayHandle val, const uint8_t *buf, ffi_size_t len), buf, len)
+FFI_FUNCTION(void, copyToByteArray, (ByteArrayHandle val, const uint8_t *buf, ffi_size_t len), buf, len)
+FFI_FUNCTION(ffi_size_t, getByteArraySize, (ByteArrayHandle val))
+FFI_FUNCTION(void *, getByteArrayDataPtr, (ByteArrayHandle val))
+
 /* --- SER MESSAGE INTERFACE --- */
 FFI_FUNCTION(SerMessageHandle, createSerMessage, (), )
 FFI_FUNCTION(void, destroySerMessage, (SerMessageHandle val), val)
-FFI_FUNCTION(bool, serializeSerMessage, (SerMessageHandle val, uint8_t *out_buf, ffi_size_t max_len, ffi_size_t *out_written), val, out_buf, max_len,
-             out_written)
+FFI_FUNCTION(ByteArrayHandle, serializeSerMessage, (SerMessageHandle val), val)
 FFI_FUNCTION(bool, deserializeSerMessage, (const uint8_t *buf, ffi_size_t len, SerMessageHandle out_val), buf, len, out_val)
+FFI_FUNCTION(bool, deserializeSerMessageFromByteArray, (ByteArrayHandle val, SerMessageHandle out_val), val, out_val)
 
 /* --- SER VALUE INTERFACE --- */
 FFI_FUNCTION(SerValueHandle, createSerValue, (), )
 FFI_FUNCTION(void, destroySerValue, (SerValueHandle val), val)
-FFI_FUNCTION(bool, serializeSerValue, (SerValueHandle val, uint8_t *out_buf, ffi_size_t max_len, ffi_size_t *out_written), val, out_buf, max_len, out_written)
+FFI_FUNCTION(ByteArrayHandle, serializeSerValue, (SerValueHandle val), val)
 FFI_FUNCTION(bool, deserializeSerValue, (const uint8_t *buf, ffi_size_t len, SerValueHandle out_val), buf, len, out_val)
+FFI_FUNCTION(bool, deserializeSerValueFromByteArray, (ByteArrayHandle val, SerValueHandle out_val), val, out_val)
 
 /* --- LOGGER INTERFACE --- */
 FFI_FUNCTION(LoggerHandle, getOrCreateLogger, (const char *name), name)
