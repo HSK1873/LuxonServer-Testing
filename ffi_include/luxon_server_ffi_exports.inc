@@ -156,7 +156,7 @@ FFI_FUNCTION(bool, gameMatchesFilter, (SerValueHandle event_data, SerValueHandle
 /* --- LOBBY INTERFACE --- */
 FFI_FUNCTION(LobbyHandle, createLobby, (const char *name, uint8_t type), name, type)
 FFI_FUNCTION(void, destroyLobby, (LobbyHandle lobby), lobby)
-FFI_FUNCTION(GameHandle, lobbyCreateGame, (LobbyHandle lobby, const char *id, bool or_get, SerValueHandle out_err_resp), lobby, id, or_get, out_err_resp)
+FFI_FUNCTION(GameHandle, lobbyCreateGame, (LobbyHandle lobby, const char *id, bool or_get, SerMessageHandle out_err_resp), lobby, id, or_get, out_err_resp)
 FFI_FUNCTION(ffi_size_t, lobbyGetPeerCount, (LobbyHandle lobby), lobby)
 FFI_FUNCTION(ffi_size_t, lobbyGetMasterPeerCount, (LobbyHandle lobby), lobby)
 FFI_FUNCTION(bool, lobbyQueryLobbies, (LobbyHandle lobby, const char *sql_queries, char *out_buf, ffi_size_t max_len, ffi_size_t *out_written), lobby,
