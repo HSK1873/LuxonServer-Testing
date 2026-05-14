@@ -186,8 +186,8 @@ private:
     decltype(servers_)::iterator next_server_it_;
     std::list<HandlerPtr<HandlerBase>> connections_;
     std::priority_queue<ScheduledTask, std::vector<ScheduledTask>, std::greater<ScheduledTask>> scheduled_tasks_;
-#ifdef LUXON_SERVER_MULTITHREADED
     std::queue<std::move_only_function<void()>> main_loop_calls_;
+#ifdef LUXON_SERVER_MULTITHREADED
     std::mutex main_loop_calls_mutex_;
 #endif
 
@@ -302,7 +302,9 @@ public:
     /// \note This function is thread-safe
     ///
     void enqueue_in_main_loop(std::move_only_function<void()>&& fn) {
+#ifdef LUXON_SERVER_MULTITHREADED
         std::scoped_lock L(main_loop_calls_mutex_);
+#endif
         main_loop_calls_.emplace(std::move(fn));
     }
 #endif

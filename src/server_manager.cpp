@@ -498,7 +498,9 @@ bool ServerManager::run_once() {
             // Get next callback safely
             std::move_only_function<void()> fn{};
             {
+#ifdef LUXON_SERVER_MULTITHREADED
                 std::scoped_lock L(main_loop_calls_mutex_);
+#endif
                 if (!main_loop_calls_.empty()) {
                     fn = std::move(main_loop_calls_.front());
                     main_loop_calls_.pop();
