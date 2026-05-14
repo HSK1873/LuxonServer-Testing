@@ -44,7 +44,7 @@ build_fullffi:debian:amd64:
   script:
     - cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_UNITY_BUILD=ON -DLUXON_SERVER_BUILD_FFI=ON -DLUXON_SERVER_EXPOSE_FULL_FFI=ON
     - cmake --build build
-    - mv build/libluxon_server_ffi.so build/luxon_server_fullffi.glibc.rel+debinfo.linux-x86_64
+    - mv build/libluxon_server_ffi.so build/luxon_server.fullffi.glibc.rel+debinfo.linux-x86_64
 
 # RelWithDebInfo build aarch64 via Debian Trixie
 build:debian:aarch64:
@@ -262,7 +262,7 @@ build_fullffi:wasip1:wasm32:
       cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLUXON_SERVER_BUILD_FFI=ON -DLUXON_SERVER_EXPOSE_FULL_FFI=ON
       -DCMAKE_TOOLCHAIN_FILE=$WASI_SDK_PREFIX/share/cmake/wasi-sdk-p1.cmake
     - cmake --build build
-    - mv build/luxon_server_ffi build/luxon_server_fullffi.wasi-sdk.rel+debinfo.wasm
+    - mv build/luxon_server_ffi build/luxon_server.fullffi.wasi-sdk.rel+debinfo.wasm
 
 # RelWithDebInfo build amd64 via MSVC
 build:msvc:amd64:
