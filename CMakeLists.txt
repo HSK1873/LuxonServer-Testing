@@ -24,17 +24,21 @@ include(cmake/CPM.cmake)
 
 option(LUXON_SERVER_BUILD_FFI "Builds shared library with C FFI" OFF)
 option(LUXON_SERVER_ENABLE_PLUGINS "Enable use of plugins" ${LUXON_SERVER_EXPOSE_FULL_FFI})
+
 if (LUXON_SERVER_BUILD_FFI)
     option(LUXON_SERVER_EXPOSE_FULL_FFI "Build with full FFI interface exposed" OFF)
-    set(LUXON_SERVER_ENABLE_COROUTINES OFF)
+    # If building FFI, coroutines are strictly disabled
+    set(LUXON_SERVER_ENABLE_COROUTINES OFF CACHE BOOL "Enable execution of handler code in coroutines" FORCE)
 else()
-    set(LUXON_SERVER_EXPOSE_FULL_FFI OFF)
+    # If not building FFI, full FFI exposure must be strictly disabled
+    set(LUXON_SERVER_EXPOSE_FULL_FFI OFF CACHE BOOL "Build with full FFI interface exposed" FORCE)
     if (LUXON_SERVER_ENABLE_PLUGINS OR LUXON_SERVER_BUILD_FFI)
         option(LUXON_SERVER_ENABLE_COROUTINES "Enable execution of handler code in coroutines" OFF)
     else()
-        set(LUXON_SERVER_ENABLE_COROUTINES OFF)
+        set(LUXON_SERVER_ENABLE_COROUTINES OFF CACHE BOOL "Enable execution of handler code in coroutines" FORCE)
     endif()
 endif()
+
 option(LUXON_SERVER_ENABLE_WEBSERVER "Enable the built-in webserver" ON)
 option(LUXON_SERVER_POLL "Poll blindly instead of select with timeout, less efficient" OFF)
 option(LUXON_SERVER_HOOKPOINTS "Allows library user or plugins to hook into specific parts of Luxon Server" ${LUXON_SERVER_EXPOSE_FULL_FFI})
