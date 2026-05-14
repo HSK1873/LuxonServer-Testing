@@ -391,6 +391,25 @@ void *getByteArrayDataPtr(ByteArrayHandle val) {
     return nullptr;
 }
 
+void pushToByteArray(ByteArrayHandle val, uint8_t byte) {
+    if (auto *array = unwrap<ByteArray>(val))
+        return array->push_back(byte);
+}
+
+uint8_t getInByteArray(ByteArrayHandle val, ffi_size_t index) {
+    if (auto *array = unwrap<ByteArray>(val)) {
+        if (index < array->size())
+            return (*array)[index];
+        return 0;
+    }
+}
+
+void setInByteArray(ByteArrayHandle val, ffi_size_t index, uint8_t byte) {
+    if (auto *array = unwrap<ByteArray>(val))
+        if (index < array->size())
+            (*array)[index] = byte;
+}
+
 /* ============================================================================
  * SER MESSAGE INTERFACE IMPLEMENTATION
  * ============================================================================ */

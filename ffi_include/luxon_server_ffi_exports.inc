@@ -48,6 +48,9 @@ FFI_FUNCTION(void, appendToByteArray, (ByteArrayHandle val, const uint8_t *buf, 
 FFI_FUNCTION(void, copyToByteArray, (ByteArrayHandle val, const uint8_t *buf, ffi_size_t len), buf, len)
 FFI_FUNCTION(ffi_size_t, getByteArraySize, (ByteArrayHandle val))
 FFI_FUNCTION(void *, getByteArrayDataPtr, (ByteArrayHandle val))
+FFI_FUNCTION(void, pushToByteArray, (ByteArrayHandle val, uint8_t byte), val, byte)
+FFI_FUNCTION(uint8_t, getInByteArray, (ByteArrayHandle val, ffi_size_t index), val, index)
+FFI_FUNCTION(void, setInByteArray, (ByteArrayHandle val, ffi_size_t index, uint8_t byte), val, index, byte)
 
 /* --- SER MESSAGE INTERFACE --- */
 FFI_FUNCTION(SerMessageHandle, createSerMessage, (), )
