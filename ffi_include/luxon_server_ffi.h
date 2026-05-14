@@ -83,7 +83,7 @@ typedef struct {
 #include "luxon_server_ffi_imports.inc"
 } LuxonServerImports;
 
-FFI_EXPORT void luxonSetServerImports(const LuxonServerImports *imports);
+FFI_EXPORT(luxonSetServerImports) void luxonSetServerImports(const LuxonServerImports *imports);
 #endif
 
 #ifdef __cplusplus

@@ -110,7 +110,7 @@ template <typename HandleT> inline HandleT wrap(std::nullptr_t) {
 #if defined(FFI_WASM) || defined(__wasm__)
     return 0u;
 #else
-    return reinterpret_cast<HandleT>(nullptr);
+    return static_cast<HandleT>(nullptr);
 #endif
 }
 
@@ -397,11 +397,10 @@ void pushToByteArray(ByteArrayHandle val, uint8_t byte) {
 }
 
 uint8_t getInByteArray(ByteArrayHandle val, ffi_size_t index) {
-    if (auto *array = unwrap<ByteArray>(val)) {
+    if (auto *array = unwrap<ByteArray>(val))
         if (index < array->size())
             return (*array)[index];
-        return 0;
-    }
+    return 0;
 }
 
 void setInByteArray(ByteArrayHandle val, ffi_size_t index, uint8_t byte) {
@@ -428,7 +427,7 @@ void destroySerMessage(SerMessageHandle val) {
 ByteArrayHandle serializeSerMessage(SerMessageHandle val) {
     if (!val)
         return wrap<ByteArrayHandle>(nullptr);
-    return ffi_safe_call<ByteArrayHandle>(false, [=] {
+    return ffi_safe_call<ByteArrayHandle>(wrap<ByteArrayHandle>(nullptr), [=] {
         auto *v = unwrap<luxon::ser::Message>(val);
         luxon::ser::IPCBinaryProtocol proto;
         auto res = proto.Serialize(*v);
@@ -478,7 +477,7 @@ void destroySerValue(SerValueHandle val) {
 ByteArrayHandle serializeSerValue(SerValueHandle val) {
     if (!val)
         return wrap<ByteArrayHandle>(nullptr);
-    return ffi_safe_call<ByteArrayHandle>(false, [=] {
+    return ffi_safe_call<ByteArrayHandle>(wrap<ByteArrayHandle>(nullptr), [=] {
         auto *v = unwrap<luxon::ser::Value>(val);
         auto proto = luxon::ser::IProtocol::make(1, 8);
         luxon::ser::ByteWriter writer;
