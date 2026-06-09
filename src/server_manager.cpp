@@ -255,8 +255,7 @@ template <typename T> T *GetRawPointer(const std::shared_ptr<T>& ptr) { return p
 template <typename T> T *GetRawPointer(const std::unique_ptr<T>& ptr) { return ptr.get(); }
 } // namespace
 
-ServerManagerConfig ServerManager::receive_config_from_ipc(int child_fd) {
-    GameIPC ipc(child_fd);
+ServerManagerConfig ServerManager::receive_config_from_ipc(GameIPC& ipc) {
     std::optional<luxon::ser::Message> msg;
 
     // Poll the non-blocking IPC socket until the parent transmits the configuration
@@ -327,8 +326,8 @@ ServerManagerConfig ServerManager::parse_config(const std::string& config_conten
 
 ServerManager::ServerManager(const std::string& config_file) : ServerManager(load_config_from_file(config_file)) {}
 
-ServerManager::ServerManager(ServerManagerConfig config) : endpoints(std::move(config.endpoints)) {
-    log_ = create_logger("ServerManager");
+ServerManager::ServerManager(ServerManagerConfig config, GameIPC&& ipc) : endpoints(std::move(config.endpoints)), ipc(std::move(ipc)) {
+    log_ = create_logger(this->ipc.is_open() ? std::format("Subprocess {} ServerManager", this->ipc.get_fd()) : "ServerManager");
 #ifndef NDEBUG
     log_->set_level(log_level::trace);
 #endif
@@ -356,7 +355,7 @@ ServerManager::ServerManager(ServerManagerConfig config) : endpoints(std::move(c
     setup();
 }
 
-ServerManager::ServerManager(int child_fd) : ServerManager(receive_config_from_ipc(child_fd)) {}
+ServerManager::ServerManager(GameIPC&& ipc) : ServerManager(receive_config_from_ipc(ipc), std::move(ipc)) {}
 
 const std::string& ServerManager::get_endpoint_of(ServerType server_type, ServerProtocol server_proto) {
     ZoneScoped;
@@ -726,28 +725,29 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
     child_config.max_connections = max_connections_;
     child_config.max_game_peers = max_game_peers_;
     child_config.tick_time_budget = tick_time_budget_;
+#ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
+    child_config.settings_database_path = settings_database_path + ":ro";
+#endif
 
     // Make sure child actually binds server and doesn't endlessly fork
     ServerConfig specific_config = config;
     specific_config.subprocess = false;
-    child_config.servers.push_back(std::move(specific_config));
-
-    // Filter and pass only relevant endpoints down to this child cleanly
-    std::copy_if(endpoints.begin(), endpoints.end(), std::back_inserter(child_config.endpoints),
-                 [&config](const ServerEndpoint& ep) { return ep.type == config.type; });
+    specific_config.allow_unsolicited = true;
+    child_config.servers.emplace_back(std::move(specific_config));
+    child_config.endpoints = endpoints;
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
-    // Disable embedded HTTP server on child to prevent port binding conflicts
+    // Disable embedded HTTP server on child
     if (http_config_) {
         child_config.http = http_config_;
         child_config.http->enabled = false;
     }
 #endif
 
-    // Encode the configuration object leveraging Boost.PFR
+    // Encode the configuration object
     auto val_res = pfr_codec::to_value(child_config);
     if (val_res)
-        ipc.send_message(luxon::ser::Message(luxon::ser::GenericValueMessage{std::move(*val_res)}));
+        ipc.send_message(luxon::ser::GenericValueMessage{std::move(*val_res)});
     else
         log_->error("Failed to serialize config for subprocess on port {}: {}", config.port, val_res.error().message);
 }

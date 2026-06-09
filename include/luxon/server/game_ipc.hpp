@@ -20,6 +20,11 @@ public:
     static std::optional<GameIPC> create();
 
     ///
+    /// \brief Constructs an empty, closed IPC channel
+    ///
+    GameIPC() {}
+
+    ///
     /// \brief Connects to existing IPC channel using given file descriptor
     /// \param fd File descriptor to existing IPC socket
     ///
@@ -31,6 +36,12 @@ public:
     GameIPC& operator=(GameIPC&& other) noexcept;
     GameIPC(const GameIPC&) = delete;
     GameIPC& operator=(const GameIPC&) = delete;
+
+    ///
+    /// \brief Returns fd for use in this process
+    /// \return File descriptor or -1 if not open
+    ///
+    int get_fd() const { return fd_; }
 
     ///
     /// \brief Returns child fd for use in child process

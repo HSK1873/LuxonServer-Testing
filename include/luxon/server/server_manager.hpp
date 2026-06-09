@@ -171,8 +171,10 @@ public:
     std::unordered_map<std::pair<std::string, std::string>, std::weak_ptr<App>, StringPairHasher> apps;
     std::vector<std::unique_ptr<PeerPersistent>> peer_persistent_data;
     std::vector<ServerEndpoint> endpoints;
+    GameIPC ipc;
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
     std::optional<SettingsManager> settings_manager;
+    std::string settings_database_path;
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_HOOKPOINTS
@@ -221,8 +223,6 @@ private:
     uint8_t max_game_peers_ = 0;
     uint32_t tick_time_budget_ = 2000;
 
-    static ServerManagerConfig receive_config_from_ipc(int child_fd);
-
     void setup();
     void setup_subprocess(const ServerConfig& config);
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
@@ -245,13 +245,18 @@ public:
     ///
     /// \brief Construct manager directly from C++ configuration
     ///
-    explicit ServerManager(ServerManagerConfig config);
+    explicit ServerManager(ServerManagerConfig config, GameIPC&& ipc = {});
 
     ///
     /// \brief Construct manager from IPC child fd
     /// \note Configuration will be received from parent via IPC
     ///
-    explicit ServerManager(int child_fd);
+    explicit ServerManager(GameIPC&& ipc);
+
+    ///
+    /// \brief Receive ServerManagerConfig from parent
+    ///
+    static ServerManagerConfig receive_config_from_ipc(GameIPC& ipc);
 
     ///
     /// \brief Load ServerManagerConfig from YAML file
