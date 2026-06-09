@@ -9,6 +9,7 @@
 #include "string_hash.hpp"
 #include "logger.hpp"
 #include "hookpoints.hpp"
+#include "game_ipc.hpp"
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
 #include "settings_manager.hpp"
 #endif
@@ -62,7 +63,7 @@ struct ServerConfig {
     ServerType type = ServerType::None;
     uint16_t port = 0;
 
-    bool allow_unsolicited = false;
+    bool allow_unsolicited = false, subprocess = false;
 
     std::string stun_server_host;
     uint16_t stun_server_port = 19302;
@@ -186,6 +187,7 @@ private:
     std::shared_ptr<logger> log_;
     std::vector<ServerConfig> configs_;
     std::unordered_map<uint16_t, enet::EnetServer> servers_;
+    std::unordered_map<uint16_t, GameIPC> subprocesses_;
     decltype(servers_)::iterator next_server_it_;
     std::list<HandlerPtr<HandlerBase>> connections_;
     std::priority_queue<ScheduledTask, std::vector<ScheduledTask>, std::greater<ScheduledTask>> scheduled_tasks_;

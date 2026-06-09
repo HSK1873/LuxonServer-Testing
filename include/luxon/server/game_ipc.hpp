@@ -56,9 +56,9 @@ public:
     std::optional<luxon::ser::Message> receive_message();
 
     ///
-    /// \brief Checks if IPC channel is still active
+    /// \brief Checks if IPC channel is currently open
     ///
-    bool is_valid() const { return fd_ != -1; }
+    bool is_open() const { return fd_ != -1; }
 
 private:
     GameIPC(int parent_fd, int child_fd);

@@ -63,6 +63,7 @@
 #include "handler_masterserver.hpp"
 #include "handler_gameserver.hpp"
 #include "yaml.hpp"
+#include "pfr_codec.hpp"
 
 #include <iostream>
 #include <string_view>
@@ -160,6 +161,7 @@ template <typename Fn> void ForEachSequenceItem(Yaml::Node& section, Fn&& fn) {
 void ParseServerSection(ServerManagerConfig& config, ServerType current_type, Yaml::Node& section) {
     struct {
         bool allow_unsolicited = false;
+        bool subprocess = false;
         std::string stun_host;
         uint16_t stun_port = 19302;
     } state;
@@ -167,6 +169,9 @@ void ParseServerSection(ServerManagerConfig& config, ServerType current_type, Ya
     ForEachSequenceItem(section, [&](Yaml::Node& item) {
         if (!item["allow_unsolicited"].IsNone())
             state.allow_unsolicited = item["allow_unsolicited"].As<bool>();
+
+        if (!item["subprocess"].IsNone())
+            state.subprocess = item["subprocess"].As<bool>();
 
         if (!item["stun_server"].IsNone()) {
             Yaml::Node& stun = item["stun_server"];
@@ -187,7 +192,8 @@ void ParseServerSection(ServerManagerConfig& config, ServerType current_type, Ya
         }
 
         if (!item["port"].IsNone()) {
-            config.servers.push_back({current_type, item["port"].As<uint16_t>(), state.allow_unsolicited, std::move(state.stun_host), state.stun_port});
+            config.servers.push_back(
+                {current_type, item["port"].As<uint16_t>(), state.allow_unsolicited, state.subprocess, std::move(state.stun_host), state.stun_port});
             state = {};
         }
 
@@ -333,14 +339,17 @@ const std::string& ServerManager::get_endpoint_of(ServerType server_type, Server
     ZoneScoped;
     std::vector<const std::string *> candidates;
     candidates.reserve(endpoints.size());
-    // Collect all valid addresses for the requested type
+
+    // Collect all valid addresses for requested type
     for (const auto& endpoint : endpoints)
         if (endpoint.type == server_type && endpoint.protocol == server_proto)
             candidates.push_back(&endpoint.address);
+
     // Handle cases where no config exists
     if (candidates.empty())
         throw std::runtime_error(std::format("No endpoint configuration found for {}", ServerTypeToString(server_type)));
-    // Return a random address from the candidates
+
+    // Returnrandom address from candidates
     static std::mt19937 generator{1234};
     std::uniform_int_distribution<size_t> distribution(0, candidates.size() - 1);
     return *candidates[distribution(generator)];
@@ -348,9 +357,10 @@ const std::string& ServerManager::get_endpoint_of(ServerType server_type, Server
 
 void ServerManager::run_scheduled_tasks() {
     ZoneScoped;
-    // Check if queue is empty first to avoid segfaults on top()
+
     if (scheduled_tasks_.empty())
         return;
+
     const auto& task = scheduled_tasks_.top();
     if (task.execution_time < startup_time_.get()) {
         auto callback = task.cb;
@@ -580,6 +590,9 @@ void ServerManager::setup() {
                     peer.log->warn("Uncaught exception in ENet connect state change handler: {}", e.what());
                 }
 
+                if (state == luxon::enet::EnetConnectionState::Connected)
+                    handler->HandleConnect();
+
                 if (state == enet::EnetConnectionState::Disconnected) {
                     handler->HandleDisconnect();
                     // Self-destruct handler, this will invalidate the pointer
@@ -612,15 +625,15 @@ void ServerManager::setup() {
                     peer.disconnect();
                 }
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
-                mark_command_committed();
+                if (active_command_restarter_allowed_) {
+                    peer.log->warn("Command did not commit!");
+                    mark_command_committed();
+                }
 #endif
             };
 
             // Add to connection list
-            auto& handlerPtr = connections_.emplace_back(std::move(handler));
-
-            // Tell handler that we're connected
-            handlerPtr->HandleConnect();
+            auto& handlerPtr = connections_.emplace_back(std::move(handler));           
         };
 
         server.on_stun_bind = [this, &config](enet::EnetEndpoint&& ep) {

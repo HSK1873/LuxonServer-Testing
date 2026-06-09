@@ -116,6 +116,11 @@ if (NOT TARGET magic_enum)
     CPMAddPackage("gh:Neargye/magic_enum@0.9.7")
 endif()
 
+# Include boost pfr
+if (NOT TARGET boost_pfr)
+    CPMAddPackage("gh:boostorg/pfr#boost-1.91.0")
+endif()
+
 # Add main library+executable target
 add_library(luxon_server_lib
     include/luxon/server/apps.hpp  include/luxon/server/global.hpp    include/luxon/server/logger.hpp  src/apps.cpp src/handler_gameserver.cpp    src/lobby.cpp src/platform.cpp
@@ -126,7 +131,7 @@ add_library(luxon_server_lib
     include/luxon/server/sock_selector.hpp  include/luxon/server/json_fwd.hpp      src/peer.cpp src/yaml.hpp
     include/luxon/server/lobby.hpp    include/luxon/server/string_hash.hpp  src/handler_base.cpp src/json.hpp      src/peer_persistence.cpp
     include/luxon/server/hookpoints.hpp
-    include/luxon/server/data_model.hpp
+    include/luxon/server/data_model.hpp include/luxon/server/pfr_codec.hpp
     include/luxon/server/sqlite3.h src/sqlite3.c
     src/lobby_vt.hpp src/lobby_vt.cpp
 
@@ -150,7 +155,7 @@ if (WASI)
 endif()
 
 add_executable(luxon_server src/main.cpp)
-target_link_libraries(luxon_server luxon_server_lib)
+target_link_libraries(luxon_server luxon_server_lib boost_pfr)
 
 if (LUXON_SERVER_BUILD_FFI)
     if (NOT WASI)
