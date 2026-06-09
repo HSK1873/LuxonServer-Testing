@@ -221,7 +221,10 @@ private:
     uint8_t max_game_peers_ = 0;
     uint32_t tick_time_budget_ = 2000;
 
+    static ServerManagerConfig receive_config_from_ipc(int child_fd);
+
     void setup();
+    void setup_subprocess(const ServerConfig& config);
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
     void setup_http_server();
 #endif
@@ -243,6 +246,12 @@ public:
     /// \brief Construct manager directly from C++ configuration
     ///
     explicit ServerManager(ServerManagerConfig config);
+
+    ///
+    /// \brief Construct manager from IPC child fd
+    /// \note Configuration will be received from parent via IPC
+    ///
+    explicit ServerManager(int child_fd);
 
     ///
     /// \brief Load ServerManagerConfig from YAML file
@@ -367,5 +376,7 @@ public:
         return false;
 #endif
     }
+
+    static std::function<void(int fd)> handle_start_subprocess;
 };
 } // namespace server

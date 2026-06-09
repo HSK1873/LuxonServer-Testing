@@ -3,16 +3,50 @@
 
 #include "luxon/server/game_ipc.hpp"
 
-#include <luxon/ser_ipc_binary.hpp>
+#include <print>
+#include <cerrno>
+#include <cstring>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <cerrno>
-#include <cstring>
+#include <luxon/ser_ipc_binary.hpp>
 
 namespace server {
 namespace {
 luxon::ser::IPCBinaryProtocol protocol;
+
+void print_hex_dump(std::span<const uint8_t> data) {
+    constexpr size_t bytes_per_line = 16;
+
+    for (size_t i = 0; i < data.size(); i += bytes_per_line) {
+        // Print memory offset
+        std::print("{:08x}  ", i);
+
+        std::string ascii_chars;
+        ascii_chars.reserve(bytes_per_line);
+
+        // Print hex bytes
+        for (size_t j = 0; j < bytes_per_line; ++j) {
+            // Add extra space in middle for traditional hex dump readability
+            if (j == 8)
+                std::print(" ");
+
+            if (i + j < data.size()) {
+                uint8_t byte = data[i + j];
+                std::print("{:02x} ", byte);
+
+                // Store ASCII representation (replace non-printable chars with dot)
+                ascii_chars += std::isprint(byte) ? static_cast<char>(byte) : '.';
+            } else {
+                // Pad with spaces if run out of bytes on last line
+                std::print("   ");
+            }
+        }
+
+        // Print ASCII string at end of line
+        std::println(" |{}|", ascii_chars);
+    }
+}
 }
 
 std::optional<GameIPC> GameIPC::create() {
@@ -72,6 +106,8 @@ void GameIPC::send_message(const luxon::ser::Message& msg) {
         throw std::runtime_error("Failed to serialize Game IPC message: " + payload_res.error().message);
 
     const auto& payload = payload_res.value();
+    std::println("Sending GameIPC payload:");
+    print_hex_dump(payload);
 
     // Make sure size can fit in 4-byte header framing
     if (payload.size() > UINT32_MAX)
@@ -137,13 +173,15 @@ std::optional<luxon::ser::Message> GameIPC::receive_message() {
 
     // Ensure complete message has arrived
     if (recv_buffer_.size() < sizeof(uint32_t) + payload_len)
-        return std::nullopt; // Partial message, wait for more data in future ticks
+        return std::nullopt; // Partial message, wait for more data in future calls
 
     // Extract payload
     luxon::ser::ByteArray payload(recv_buffer_.begin() + sizeof(uint32_t), recv_buffer_.begin() + sizeof(uint32_t) + payload_len);
 
     // Discard processed sequence from buffer so subsequent messages drop down
     recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + sizeof(uint32_t) + payload_len);
+    std::println("Received GameIPC payload:");
+    print_hex_dump(payload);
 
     // Deserialize
     auto msg_res = protocol.Deserialize(payload);

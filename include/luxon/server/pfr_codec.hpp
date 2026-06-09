@@ -1,8 +1,9 @@
+// Copyright (c) 2026, the Luxon Server contributors
+// SPDX-License-Identifier: BSD-3-Clause
+
 #pragma once
 
 #include <array>
-#include <cmath>
-#include <cstddef>
 #include <expected>
 #include <limits>
 #include <map>
@@ -15,6 +16,9 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#include <concepts>
+#include <cstddef>
+#include <cmath>
 #include <boost/pfr.hpp>
 #include <luxon/ser_types.hpp>
 
@@ -480,18 +484,18 @@ template <typename T> result<Value> encode(const T& x, const options& opt, std::
         return Value(x);
     } else if constexpr (std::same_as<U, bool>) {
         return Value(x);
-    } else if constexpr (std::is_integral_v<U>) {
-        if constexpr (std::same_as<U, uint8_t> || std::same_as<U, int16_t> || std::same_as<U, int32_t> || std::same_as<U, int64_t>) {
+    } else if constexpr (std::integral<U>) {
+        if constexpr (is_exact_native_v<U>)
             return Value(x);
-        } else {
-            return fail<Value>(path, "integer type not directly representable by Value");
-        }
-    } else if constexpr (std::is_floating_point_v<U>) {
-        if constexpr (std::same_as<U, float> || std::same_as<U, double>) {
+        else if constexpr (sizeof(U) <= 2)
+            return Value(static_cast<int32_t>(x));
+        else
+            return Value(static_cast<int64_t>(x));
+    } else if constexpr (std::floating_point<U>) {
+        if constexpr (is_exact_native_v<U>)
             return Value(x);
-        } else {
-            return fail<Value>(path, "floating-point type not directly representable by Value");
-        }
+        else
+            return Value(static_cast<double>(x));
     } else if constexpr (std::same_as<U, Hashtable>) {
         return Value(std::make_shared<Hashtable>(x));
     } else if constexpr (is_std_vector_v<U>) {
@@ -627,10 +631,26 @@ template <typename T> result<T> decode(const Value& v, const options& opt, std::
         if (auto p = v.get_ptr<Under>())
             return static_cast<U>(*p);
         return type_error<U>(path, "exact underlying enum type", v);
-    } else if constexpr ((std::is_arithmetic_v<U> && !std::same_as<U, bool>)) {
-        if (auto p = v.get_ptr<U>())
-            return *p;
-        return type_error<U>(path, "exact numeric type", v);
+    } else if constexpr (std::integral<U> || std::floating_point<U>) {
+        if constexpr (is_exact_native_v<U>) {
+            if (auto p = v.get_ptr<U>())
+                return *p;
+        } else {
+            std::optional<U> extracted;
+            std::visit(
+                [&](const auto& arg) {
+                    using A = std::decay_t<decltype(arg)>;
+                    // Statically filter out variant's non-numeric payloads (strings, arrays, etc.)
+                    if constexpr (std::integral<A> || std::floating_point<A>)
+                        if constexpr (!std::same_as<A, bool>)
+                            extracted = static_cast<U>(arg);
+                },
+                v.value);
+
+            if (extracted)
+                return *extracted;
+        }
+        return type_error<U>(path, "numeric type", v);
     } else if constexpr (is_std_vector_v<U>) {
         using E = typename U::value_type;
 

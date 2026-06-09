@@ -83,6 +83,8 @@
 #include <tracy/Tracy.hpp>
 
 namespace server {
+std::function<void(int)> ServerManager::handle_start_subprocess{};
+
 namespace {
 ServerType StringToServerType(const std::string& str) {
     if (str == "NameServer")
@@ -253,6 +255,25 @@ template <typename T> T *GetRawPointer(const std::shared_ptr<T>& ptr) { return p
 template <typename T> T *GetRawPointer(const std::unique_ptr<T>& ptr) { return ptr.get(); }
 } // namespace
 
+ServerManagerConfig ServerManager::receive_config_from_ipc(int child_fd) {
+    GameIPC ipc(child_fd);
+    std::optional<luxon::ser::Message> msg;
+
+    // Poll the non-blocking IPC socket until the parent transmits the configuration
+    while (!(msg = ipc.receive_message()))
+        ;
+
+    // Expect a GenericValueMessage containing the PFR-encoded ServerManagerConfig
+    if (auto *gvm = std::get_if<luxon::ser::GenericValueMessage>(&msg.value())) {
+        auto decoded = pfr_codec::from_value<ServerManagerConfig>(gvm->value);
+        if (!decoded)
+            throw std::runtime_error("Failed to decode ServerManagerConfig from IPC: " + decoded.error().message);
+        return std::move(*decoded);
+    }
+
+    throw std::runtime_error("Unexpected IPC message type during subprocess initialization");
+}
+
 ServerManagerConfig ServerManager::load_config_from_file(const std::string& config_file) { return parse_config(LoadFile(config_file)); }
 
 ServerManagerConfig ServerManager::parse_config(const std::string& config_contents) {
@@ -334,6 +355,8 @@ ServerManager::ServerManager(ServerManagerConfig config) : endpoints(std::move(c
     log_->info("Config looks alright, setting up accordingly");
     setup();
 }
+
+ServerManager::ServerManager(int child_fd) : ServerManager(receive_config_from_ipc(child_fd)) {}
 
 const std::string& ServerManager::get_endpoint_of(ServerType server_type, ServerProtocol server_proto) {
     ZoneScoped;
@@ -530,6 +553,11 @@ void ServerManager::setup() {
 
     // Create servers
     for (const auto& config : configs_) {
+        if (config.subprocess) {
+            setup_subprocess(config);
+            continue; // Skip the native bind routine in the parent for this iteration
+        }
+
         // Create enet server and configure it
         log_->info("Setting up {} on port {}", ServerTypeToString(config.type), config.port);
 
@@ -669,5 +697,58 @@ void ServerManager::setup() {
     }
 
     next_server_it_ = servers_.end();
+}
+
+void ServerManager::setup_subprocess(const ServerConfig& config) {
+    log_->info("Setting up {} on port {} as a subprocess", ServerTypeToString(config.type), config.port);
+
+    if (!handle_start_subprocess) {
+        log_->error("handle_start_subprocess is not configured! Cannot start subprocess for port {}", config.port);
+        return;
+    }
+
+    auto ipc_opt = GameIPC::create();
+    if (!ipc_opt) {
+        log_->error("Failed to create GameIPC socket pair for port {}", config.port);
+        return;
+    }
+
+    // Emplace IPC into manager's tracked subprocesses
+    GameIPC& ipc = subprocesses_.try_emplace(config.port, std::move(*ipc_opt)).first->second;
+
+    // Trigger external subprocess logic using new child socket
+    handle_start_subprocess(ipc.get_child_fd());
+    ipc.close_child_fd();
+
+    // Synthesize child's configuration state
+    ServerManagerConfig child_config;
+    child_config.enable_ipv6 = enable_ipv6_;
+    child_config.max_connections = max_connections_;
+    child_config.max_game_peers = max_game_peers_;
+    child_config.tick_time_budget = tick_time_budget_;
+
+    // Make sure child actually binds server and doesn't endlessly fork
+    ServerConfig specific_config = config;
+    specific_config.subprocess = false;
+    child_config.servers.push_back(std::move(specific_config));
+
+    // Filter and pass only relevant endpoints down to this child cleanly
+    std::copy_if(endpoints.begin(), endpoints.end(), std::back_inserter(child_config.endpoints),
+                 [&config](const ServerEndpoint& ep) { return ep.type == config.type; });
+
+#ifdef LUXON_SERVER_ENABLE_WEBSERVER
+    // Disable embedded HTTP server on child to prevent port binding conflicts
+    if (http_config_) {
+        child_config.http = http_config_;
+        child_config.http->enabled = false;
+    }
+#endif
+
+    // Encode the configuration object leveraging Boost.PFR
+    auto val_res = pfr_codec::to_value(child_config);
+    if (val_res)
+        ipc.send_message(luxon::ser::Message(luxon::ser::GenericValueMessage{std::move(*val_res)}));
+    else
+        log_->error("Failed to serialize config for subprocess on port {}: {}", config.port, val_res.error().message);
 }
 } // namespace server
