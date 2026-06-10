@@ -33,7 +33,7 @@ void store_persistent_peer(ServerManager& server_manager, std::unique_ptr<PeerPe
     if (!pp->app)
         return;
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     luxon::ser::EventMessage msg;
     msg.event_code = IPCEventCodes::PersistentPeerStore;
     msg.parameters[DictKeyCodes::LoadBalancing::Token] = pp->token;
@@ -55,7 +55,7 @@ void store_persistent_peer(ServerManager& server_manager, std::unique_ptr<PeerPe
 std::unique_ptr<PeerPersistent> load_persistent_peer(ServerManager& server_manager, std::string_view token, bool refresh_token) {
     ZoneScoped;
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     luxon::ser::EventMessage msg;
     msg.event_code = IPCEventCodes::PersistentPeerLoad;
     msg.parameters[DictKeyCodes::LoadBalancing::Token] = std::string(token);

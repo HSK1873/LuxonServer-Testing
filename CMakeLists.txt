@@ -26,7 +26,7 @@ include(CMakeDependentOption)
 
 # Core server options
 option(LUXON_SERVER_ENABLE_WEBSERVER "Enable the built-in webserver" ON)
-option(LUXON_SERVER_ENABLE_MULTIPROCESSINGING "Enable IPC system and game server subprocesses" OFF)
+option(LUXON_SERVER_ENABLE_MULTIPROCESSING "Enable IPC system and game server subprocesses" OFF)
 option(LUXON_SERVER_POLL "Poll blindly instead of select with timeout, less efficient" OFF)
 option(LUXON_USE_EMBED_RESOURCE "Use EmbedResource instead of incbin.h" OFF)
 
@@ -46,7 +46,7 @@ option(LUXON_SERVER_ENABLE_COMMAND_RESTARTER "Allow commands to be restarted lat
 
 if (LUXON_SERVER_EXPOSE_FULL_FFI)
     set(LUXON_SERVER_BUILD_FFI ON CACHE BOOL "Builds shared library with C FFI" FORCE)
-    set(LUXON_SERVER_ENABLE_MULTIPROCESSINGING ON CACHE BOOL "Enable IPC system and game server subprocesses" FORCE)
+    set(LUXON_SERVER_ENABLE_MULTIPROCESSING ON CACHE BOOL "Enable IPC system and game server subprocesses" FORCE)
     set(LUXON_SERVER_HOOKPOINTS ON CACHE BOOL "Allows library user or plugins to hook into specific parts of Luxon Server" FORCE)
     set(LUXON_SERVER_ENABLE_PLUGINS ON CACHE BOOL "Enable use of plugins" FORCE)
     set(LUXON_SERVER_ENABLE_COMMAND_RESTARTER ON CACHE BOOL "Allow commands to be restarted later for better async support" FORCE)
@@ -206,7 +206,7 @@ if (LUXON_SERVER_ENABLE_WEBSERVER)
     )
 endif()
 
-if (LUXON_SERVER_ENABLE_MULTIPROCESSINGING)
+if (LUXON_SERVER_ENABLE_MULTIPROCESSING)
     target_link_libraries(luxon_server_lib PRIVATE boost_pfr)
     target_sources(luxon_server_lib PRIVATE
         include/luxon/server/ipc.hpp src/ipc.cpp
@@ -214,7 +214,7 @@ if (LUXON_SERVER_ENABLE_MULTIPROCESSINGING)
         include/luxon/server/pfr_codec.hpp
     )
     target_compile_definitions(luxon_server_lib PUBLIC
-        LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+        LUXON_SERVER_ENABLE_MULTIPROCESSING
     )
 endif()
 

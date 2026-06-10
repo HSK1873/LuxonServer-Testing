@@ -63,7 +63,7 @@
 #include "handler_masterserver.hpp"
 #include "handler_gameserver.hpp"
 #include "yaml.hpp"
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 #include "ipc_codes.hpp"
 #include "pfr_codec.hpp"
 #endif
@@ -358,7 +358,7 @@ template <typename T> T *GetRawPointer(const std::shared_ptr<T>& ptr) { return p
 template <typename T> T *GetRawPointer(const std::unique_ptr<T>& ptr) { return ptr.get(); }
 } // namespace
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 ServerManagerConfig ServerManager::receive_config_from_ipc(IPC& ipc) {
     std::optional<luxon::ser::Message> msg;
 
@@ -438,19 +438,19 @@ ServerManagerConfig ServerManager::parse_config(const std::string& config_conten
 ServerManager::ServerManager(const std::string& config_file) : ServerManager(load_config_from_file(config_file)) {}
 
 ServerManager::ServerManager(ServerManagerConfig config
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
                              ,
                              IPC&& ipc
 #endif
                              )
     : endpoints(std::move(config.endpoints))
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
       ,
       parent_ipc_(std::move(ipc))
 #endif
 {
     log_ = create_logger(
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
         this->parent_ipc_.is_open() ? std::format("Subprocess {} ServerManager", this->parent_ipc_.get_fd()) :
 #endif
                                     "ServerManager");
@@ -458,7 +458,7 @@ ServerManager::ServerManager(ServerManagerConfig config
     log_->set_level(log_level::trace);
 #endif
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     if (ipc.is_open())
         is_subprocess_ = true;
 #endif
@@ -486,9 +486,18 @@ ServerManager::ServerManager(ServerManagerConfig config
     setup();
 }
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 ServerManager::ServerManager(IPC&& ipc) : ServerManager(receive_config_from_ipc(ipc), std::move(ipc)) {}
 #endif
+
+std::string_view ServerManager::get_static_endpoint_address_str(std::string_view address) {
+    for (auto& endpoint : endpoints)
+        if (endpoint.address == address)
+            return endpoint.address;
+
+    log_->error("Failed to resolve endpoint address into static string: {}", address);
+    return {};
+}
 
 const ServerEndpoint& ServerManager::get_endpoint_of(ServerType server_type, ServerProtocol server_proto) {
     ZoneScoped;
@@ -640,7 +649,7 @@ bool ServerManager::run_once() {
         if (http_server_)
             http_server_->service_now();
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
         // Receive and process an IPC message per child and parent
         for (auto& [port, ipc] : subprocesses_)
             if (ipc.is_open())
@@ -674,13 +683,13 @@ bool ServerManager::run_once() {
 std::shared_ptr<App> ServerManager::get_app(const AppInfo& info) { return App::get(*this, std::string(info.app_id), std::string(info.app_version)); }
 std::shared_ptr<Lobby> ServerManager::get_lobby(App& app, const LobbyInfo& info) { return app.get_lobby(info); }
 std::expected<std::shared_ptr<Game>, std::string> ServerManager::get_game(Lobby& lobby, const GameInfo& info) {
-    auto game = lobby.create_game(std::string(info.game_id), true);
+    auto game = lobby.create_game(std::string(info.game_id), info.server_address, true);
     if (!game)
         return std::unexpected(game.error().debug_message.value_or("Unknown error"));
     return *game;
 }
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 void ServerManager::ipc_broadcast(const ser::Message& message, bool parent, bool children) {
     if (parent)
         if (&parent_ipc_ != ipc_broadcast_skip_)
@@ -713,7 +722,7 @@ void ServerManager::setup_http_server() {
 }
 #endif
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 void ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& msg) {
     ipc_broadcast_skip_ = &sender;
 
@@ -752,11 +761,6 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
 
                 log_->info("Received game deletion event via IPC for {}", game->id);
 
-                // Invoke deletion handlers
-                for (auto& handler : game->lobby->game_list_update_handlers)
-                    if (handler.game_delete)
-                        handler.game_delete(game.get());
-
                 // Make sure game expires immediately
                 (*it)->empty_game_ttl = 0;
 
@@ -775,21 +779,36 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
                 game = *it;
             } else {
                 auto app = App::get(*this, std::string(game_info.app_id), std::string(game_info.app_version));
-                if (!app)
+                if (!app) {
+                    log_->error("Failed to synchronize game via IPC: Unable to get matching application");
                     return;
+                }
 
                 auto lobby = app->get_lobby({game_info.lobby_name, game_info.lobby_type});
-                if (!lobby)
+                if (!lobby) {
+                    log_->error("Failed to synchronize game via IPC: Unable to get matching lobby");
                     return;
+                }
 
-                auto expected_game = lobby->create_game(std::string(game_info.game_id));
+                std::string_view address;
+                if (auto *address_ptr = params[DictKeyCodes::LoadBalancing::Address].get_ptr<std::string>())
+                    address = *address_ptr;
+                if (address.empty()) {
+                    log_->error("Failed to synchronize game via IPC: Unable to get matching address");
+                    return;
+                }
+
+                auto expected_game = lobby->create_game(std::string(game_info.game_id), address, true);
                 if (expected_game) {
                     game = std::move(expected_game.value());
-
-                    // Persist locally
-                    external_games_.push_back(game);
-                    lobby->games[game->id] = game;
-                    is_new = true;
+                    if (game) {
+                        // Persist locally
+                        external_games_.push_back(game);
+                        is_new = true;
+                    } else {
+                        log_->error("Failed to synchronize game via IPC: Unable to create matching game");
+                        return;
+                    }
                 }
             }
 
@@ -798,16 +817,14 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
             // Apply updated properties
             auto props_ptr = params[DictKeyCodes::Properties::GameProperties].get_or<ser::HashtablePtr>(nullptr);
             if (props_ptr) {
-                // Apply updated properties
-                auto props_ptr = params[DictKeyCodes::Properties::GameProperties].get_or<ser::HashtablePtr>(nullptr);
-                if (props_ptr) {
-                    // Handle PlayerCount separately
-                    if (auto it = props_ptr->find(GameProps::PlayerCount); it != props_ptr->end())
-                        it->second.store_if<uint8_t>(game->dummy_peer_count);
+                // Handle PlayerCount separately
+                if (auto it = props_ptr->find(GameProps::PlayerCount); it != props_ptr->end())
+                    it->second.store_if<uint8_t>(game->dummy_peer_count);
+                if (game->dummy_peer_count > 0)
+                    game->is_created = true;
 
-                    // Apply all other properties
-                    game->insert_game_props(*props_ptr);
-                }
+                // Apply all other properties
+                game->insert_game_props(*props_ptr);
             }
 
             return;
@@ -882,7 +899,7 @@ void ServerManager::setup() {
     // Create servers
     for (const auto& config : configs_) {
         if (config.subprocess) {
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
             setup_subprocess(config);
             continue; // Skip the native bind routine in the parent for this iteration
 #else
@@ -980,12 +997,13 @@ void ServerManager::setup() {
                 try {
                     handler->HandleENetCommand(std::move(cmd));
                 } catch (const std::exception& e) {
-                    peer->log->critical("Disconnecting due to uncaught exception in ENet command handler: {}", e.what());
-                    peer->disconnect();
+                    auto& peer = *handler->get_peer();
+                    peer.log->critical("Disconnecting due to uncaught exception in ENet command handler: {}", e.what());
+                    peer.disconnect();
                 }
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
                 if (active_command_restarter_allowed_) {
-                    peer->log->warn("Command did not commit!");
+                    peer.log->warn("Command did not commit!");
                     mark_command_committed();
                 }
 #endif
@@ -1030,7 +1048,7 @@ void ServerManager::setup() {
     next_server_it_ = servers_.end();
 }
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 void ServerManager::setup_subprocess(const ServerConfig& config) {
     log_->info("Setting up {} on port {} as a subprocess", ServerTypeToString(config.type), config.port);
 

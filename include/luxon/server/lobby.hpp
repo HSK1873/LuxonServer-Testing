@@ -46,7 +46,7 @@ struct Lobby : std::enable_shared_from_this<Lobby> {
 
     sqlite3 *sql{};
 
-    std::expected<std::shared_ptr<Game>, ser::OperationResponseMessage> create_game(std::string id, bool or_get = false);
+    std::expected<std::shared_ptr<Game>, ser::OperationResponseMessage> create_game(std::string id, std::string_view address, bool or_get = false);
 
     size_t get_peer_count() const;
     size_t get_master_peer_count() const;

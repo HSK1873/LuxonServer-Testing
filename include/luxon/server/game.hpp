@@ -46,6 +46,7 @@ struct Peer;
 
 struct GameInfo : public LobbyInfo {
     std::string_view game_id;
+    std::string_view server_address;
 };
 
 struct GamePeer {
@@ -83,6 +84,7 @@ struct Event {
 struct Game : std::enable_shared_from_this<Game> {
     const std::shared_ptr<Lobby> lobby;
     const std::string id;
+    const std::string_view server_address;
 
     ~Game();
 
@@ -104,7 +106,7 @@ struct Game : std::enable_shared_from_this<Game> {
     std::vector<std::string> lobby_props;
     std::list<Event> event_cache;
 
-    Game(std::shared_ptr<Lobby> lobby, std::string id) : lobby(std::move(lobby)), id(std::move(id)) {}
+    Game(std::shared_ptr<Lobby> lobby, std::string id, std::string_view server_address);
 
     std::list<GamePeer> peers;
     uint8_t dummy_peer_count = 0;

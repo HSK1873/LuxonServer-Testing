@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "luxon/server/server_manager.hpp"
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 #include "luxon/server/ipc.hpp"
 #endif
 #include "platform.hpp"
@@ -29,7 +29,7 @@
 int main(int argc, char *argv[]) {
     Platform P;
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     // If spawned as a subprocess intercept CLI flag and run as child
     if (argc >= 3 && std::string_view(argv[1]) == "--child-fd") {
 #ifdef __linux__
@@ -54,15 +54,6 @@ int main(int argc, char *argv[]) {
     // Set up the subprocess spawning mechanism before the manager is initialized
     server::ServerManager::handle_start_subprocess = [exe_path](int fd) {
 #if defined(_WIN32)
-        // Mark underlying OS handle as inheritable for child process
-        HANDLE os_handle = reinterpret_cast<HANDLE>(_get_osfhandle(fd));
-        if (os_handle != INVALID_HANDLE_VALUE) {
-            SetHandleInformation(os_handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
-        } else {
-            std::cerr << "Failed to get OS handle for FD " << fd << " to create subprocess" << std::endl;
-            return;
-        }
-
         // Build command line
         std::string cmd = exe_path + " --child-fd " + std::to_string(fd);
 

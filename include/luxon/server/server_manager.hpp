@@ -9,7 +9,7 @@
 #include "string_hash.hpp"
 #include "logger.hpp"
 #include "hookpoints.hpp"
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 #include "ipc.hpp"
 #endif
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
@@ -196,7 +196,7 @@ private:
     std::vector<std::shared_ptr<Game>> external_games_;
     std::priority_queue<ScheduledTask, std::vector<ScheduledTask>, std::greater<ScheduledTask>> scheduled_tasks_;
     std::queue<std::move_only_function<void()>> main_loop_calls_;
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     IPC parent_ipc_;
     IPC *ipc_broadcast_skip_{};
     bool is_subprocess_{};
@@ -232,14 +232,14 @@ private:
     uint32_t tick_time_budget_ = 2000;
 
     void setup();
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     void setup_subprocess(const ServerConfig& config);
 #endif
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
     void setup_http_server();
 #endif
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     void process_child_ipc_message(IPC& sender, const luxon::ser::Message& msg);
     void process_parent_ipc_message(IPC& sender, const luxon::ser::Message& msg);
     void process_ipc_event(const ser::EventMessage& event_msg);
@@ -262,13 +262,13 @@ public:
     /// \brief Construct manager directly from C++ configuration
     ///
     explicit ServerManager(ServerManagerConfig config
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
                            ,
                            IPC&& ipc = {}
 #endif
     );
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     ///
     /// \brief Construct manager from IPC child fd
     /// \note Configuration will be received from parent via IPC
@@ -340,7 +340,7 @@ public:
     ///
     std::expected<std::shared_ptr<Game>, std::string> get_game(Lobby& lobby, const GameInfo& info);
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     ///
     /// \brief Broadcasts a serialized message via IPC to parent and/or child processes
     /// \param message The serialized message payload to send
@@ -357,6 +357,8 @@ public:
     ///
     void ipc_broadcast(const ser::Message& message) { return ipc_broadcast(message, true, true); }
 #endif
+
+    std::string_view get_static_endpoint_address_str(std::string_view address);
 
     ///
     /// \brief Gets the external address of a random server of given type

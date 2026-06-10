@@ -63,7 +63,7 @@ Game::~Game() {
         execute_plugin_chain(&PluginBase::OnCloseGame, info);
     });
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     ser::EventMessage ipc_event;
     ipc_event.event_code = IPCEventCodes::GameDelete;
     add_game_info(ipc_event.parameters);
@@ -71,8 +71,12 @@ Game::~Game() {
 #endif
 }
 
+Game::Game(std::shared_ptr<Lobby> lobby, std::string id, std::string_view server_address)
+    : lobby(std::move(lobby)), id(std::move(id)), server_address(get_server_manager().get_static_endpoint_address_str(server_address)) {}
+
 void Game::add_game_info(ser::ParameterList& params) {
     params[DictKeyCodes::GameAndActor::GameId] = id;
+    params[DictKeyCodes::LoadBalancing::Address] = std::string(server_address);
     lobby->add_lobby_info(params);
 }
 
@@ -365,12 +369,14 @@ void Game::trigger_lobby_update() {
     for (auto& handler : lobby->game_list_update_handlers)
         handler.game_change(shared_this);
 
-#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     // Send IPC event
     ser::EventMessage ipc_event;
     ipc_event.event_code = IPCEventCodes::GameUpdate;
     add_game_info(ipc_event.parameters);
     ipc_event.parameters[DictKeyCodes::Properties::GameProperties] = std::make_shared<ser::Hashtable>(get_lobby_game_props());
+    if (!server_address.empty())
+        ipc_event.parameters[DictKeyCodes::LoadBalancing::Address] = std::string(server_address);
     get_server_manager().ipc_broadcast(ipc_event);
 #endif
 }
@@ -567,6 +573,8 @@ GameInfo Game::decode_game_info(const ser::ParameterList& params) {
     for (const auto& [key, val] : params) {
         if (key == DictKeyCodes::GameAndActor::GameId)
             fres.game_id = val.get<std::string>();
+        if (key == DictKeyCodes::LoadBalancing::Address)
+            fres.server_address = val.get<std::string>();
     }
     return fres;
 }
