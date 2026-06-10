@@ -1,7 +1,7 @@
 // Copyright (c) 2026, the Luxon Server contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include "luxon/server/game_ipc.hpp"
+#include "luxon/server/ipc.hpp"
 
 #include <print>
 #include <cerrno>
@@ -16,31 +16,31 @@ namespace {
 luxon::ser::IPCBinaryProtocol protocol;
 }
 
-std::optional<GameIPC> GameIPC::create() {
+std::optional<IPC> IPC::create() {
     int fds[2];
     // Create local domain stream socket pair
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == -1)
         return std::nullopt;
-    return GameIPC(fds[0], fds[1]);
+    return IPC(fds[0], fds[1]);
 }
 
-GameIPC::GameIPC(int fd) : fd_(fd), child_fd_(-1) {}
+IPC::IPC(int fd) : fd_(fd), child_fd_(-1) {}
 
-GameIPC::GameIPC(int parent_fd, int child_fd) : fd_(parent_fd), child_fd_(child_fd) {}
+IPC::IPC(int parent_fd, int child_fd) : fd_(parent_fd), child_fd_(child_fd) {}
 
-GameIPC::~GameIPC() {
+IPC::~IPC() {
     if (fd_ != -1)
         close(fd_);
     if (child_fd_ != -1)
         close(child_fd_);
 }
 
-GameIPC::GameIPC(GameIPC&& other) noexcept : fd_(other.fd_), child_fd_(other.child_fd_), recv_buffer_(std::move(other.recv_buffer_)) {
+IPC::IPC(IPC&& other) noexcept : fd_(other.fd_), child_fd_(other.child_fd_), recv_buffer_(std::move(other.recv_buffer_)) {
     other.fd_ = -1;
     other.child_fd_ = -1;
 }
 
-GameIPC& GameIPC::operator=(GameIPC&& other) noexcept {
+IPC& IPC::operator=(IPC&& other) noexcept {
     if (this != &other) {
         if (fd_ != -1)
             close(fd_);
@@ -57,26 +57,26 @@ GameIPC& GameIPC::operator=(GameIPC&& other) noexcept {
     return *this;
 }
 
-void GameIPC::close_child_fd() {
+void IPC::close_child_fd() {
     if (child_fd_ != -1) {
         close(child_fd_);
         child_fd_ = -1;
     }
 }
 
-void GameIPC::send_message(const luxon::ser::Message& msg) {
+void IPC::send_message(const luxon::ser::Message& msg) {
     if (fd_ == -1)
-        throw std::runtime_error("Attempted to send message over unconnected Game IPC!");
+        throw std::runtime_error("Attempted to send message over unconnected IPC!");
 
     auto payload_res = protocol.Serialize(msg);
     if (!payload_res.has_value())
-        throw std::runtime_error("Failed to serialize Game IPC message: " + payload_res.error().message);
+        throw std::runtime_error("Failed to serialize IPC message: " + payload_res.error().message);
 
     const auto& payload = payload_res.value();
 
     // Make sure size can fit in 4-byte header framing
     if (payload.size() > UINT32_MAX)
-        throw std::runtime_error("Game IPC message too large!");
+        throw std::runtime_error("IPC message too large!");
 
     uint32_t network_len = htonl(static_cast<uint32_t>(payload.size()));
 
@@ -100,7 +100,7 @@ void GameIPC::send_message(const luxon::ser::Message& msg) {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 break; // Socket is full, retain remaining data in buffer for next call
 
-            throw std::runtime_error("Unrecoverable communication error in Game IPC: Connection reset?");
+            throw std::runtime_error("Unrecoverable communication error in IPC: Connection reset?");
         }
         written += res;
     }
@@ -110,7 +110,7 @@ void GameIPC::send_message(const luxon::ser::Message& msg) {
         send_buffer_.erase(send_buffer_.begin(), send_buffer_.begin() + written);
 }
 
-std::optional<luxon::ser::Message> GameIPC::receive_message() {
+std::optional<luxon::ser::Message> IPC::receive_message() {
     if (fd_ == -1)
         return std::nullopt;
 
@@ -124,7 +124,7 @@ std::optional<luxon::ser::Message> GameIPC::receive_message() {
             // Connection closed by the other end gracefully
             close(fd_);
             fd_ = -1;
-            throw std::runtime_error("Unrecoverable communication error in Game IPC: Connection reset");
+            throw std::runtime_error("Unrecoverable communication error in IPC: Connection reset");
         } else {
             if (errno == EINTR)
                 continue;
@@ -134,7 +134,7 @@ std::optional<luxon::ser::Message> GameIPC::receive_message() {
             // Socket Error
             close(fd_);
             fd_ = -1;
-            throw std::runtime_error("Unrecoverable communication error in Game IPC: Socket error");
+            throw std::runtime_error("Unrecoverable communication error in IPC: Socket error");
         }
     }
 
@@ -160,7 +160,7 @@ std::optional<luxon::ser::Message> GameIPC::receive_message() {
     auto msg_res = protocol.Deserialize(payload);
 
     if (!msg_res.has_value())
-        throw std::runtime_error("Failed to deserialize Game IPC message: " + msg_res.error().message);
+        throw std::runtime_error("Failed to deserialize IPC message: " + msg_res.error().message);
 
     return std::move(msg_res.value());
 }

@@ -304,11 +304,14 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             }
             auto& game = *game_expected;
 
+            // Get endpoint info
+            const auto& endpoint = server_manager_.get_endpoint_of(ServerType::GameServer, peer_->transport_protocol);
+
             // Build response
             ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::CreateGame, .return_code = ErrorCodes::Core::Ok};
-            resp.parameters[DictKeyCodes::LoadBalancing::Address] = server_manager_.get_endpoint_of(ServerType::GameServer, peer_->transport_protocol);
-            resp.parameters[DictKeyCodes::GameAndActor::GameId] = game->id;
+            resp.parameters[DictKeyCodes::LoadBalancing::Address] = endpoint.address;
             resp.parameters[DictKeyCodes::LoadBalancing::Token] = peer_->persistent->token;
+            resp.parameters[DictKeyCodes::GameAndActor::GameId] = game->id;
 
             // No turning back
             if (!server_manager_.mark_command_committed())
@@ -408,9 +411,12 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             // Expect user
             game->expected_users.emplace(peer_->persistent->user_id);
 
+            // Get endpoint info
+            const auto& endpoint = server_manager_.get_endpoint_of(ServerType::GameServer, peer_->transport_protocol);
+
             // Build and send response
             ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::JoinGame, .return_code = ErrorCodes::Core::Ok};
-            resp.parameters[DictKeyCodes::LoadBalancing::Address] = server_manager_.get_endpoint_of(ServerType::GameServer, peer_->transport_protocol);
+            resp.parameters[DictKeyCodes::LoadBalancing::Address] = endpoint.address;
             resp.parameters[DictKeyCodes::LoadBalancing::Token] = peer_->persistent->token;
             if (game->id != game_id)
                 resp.parameters[DictKeyCodes::GameAndActor::GameId] = game->id;
@@ -551,10 +557,13 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             resp.operation_code = OpCodes::Matchmaking::JoinRandomGame;
             resp.return_code = ErrorCodes::Core::Ok;
 
+            // Get endpoint info
+            const auto& endpoint = server_manager_.get_endpoint_of(ServerType::GameServer, peer_->transport_protocol);
+
             // Payload similar to Create/Join Game
-            resp.parameters[DictKeyCodes::LoadBalancing::Address] = server_manager_.get_endpoint_of(ServerType::GameServer, peer_->transport_protocol);
-            resp.parameters[DictKeyCodes::GameAndActor::GameId] = selected_game->id;
+            resp.parameters[DictKeyCodes::LoadBalancing::Address] = endpoint.address;
             resp.parameters[DictKeyCodes::LoadBalancing::Token] = peer_->persistent->token;
+            resp.parameters[DictKeyCodes::GameAndActor::GameId] = selected_game->id;
 
             send(proto_->Serialize(resp));
             peer_->log->info("Matchmaking success. Joining game: {}", selected_game->id);

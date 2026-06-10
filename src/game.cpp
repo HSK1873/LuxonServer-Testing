@@ -63,22 +63,15 @@ Game::~Game() {
         execute_plugin_chain(&PluginBase::OnCloseGame, info);
     });
 
-    auto& server_manager = get_server_manager();
-    if (server_manager.ipc.is_open()) {
-        ser::EventMessage ipc_event;
-        ipc_event.event_code = IPCEventCodes::GameDelete;
-        add_game_info(ipc_event.parameters);
-
-        server_manager.ipc.send_message(ipc_event);
-    }
+    ser::EventMessage ipc_event;
+    ipc_event.event_code = IPCEventCodes::GameDelete;
+    add_game_info(ipc_event.parameters);
+    get_server_manager().ipc_broadcast(ipc_event);
 }
 
 void Game::add_game_info(ser::ParameterList& params) {
     params[DictKeyCodes::GameAndActor::GameId] = id;
-    params[DictKeyCodes::AuthAndLobby::LobbyName] = lobby->name;
-    params[DictKeyCodes::AuthAndLobby::LobbyType] = lobby->type;
-    params[DictKeyCodes::LoadBalancing::ApplicationId] = std::string(lobby->app->id);
-    params[DictKeyCodes::LoadBalancing::AppVersion] = std::string(lobby->app->version);
+    lobby->add_lobby_info(params);
 }
 
 bool Game::matches_game_info(const GameInfo& info) const {
@@ -370,18 +363,11 @@ void Game::trigger_lobby_update() {
         handler.game_change(shared_this);
 
     // Send IPC event
-    auto& server_manager = get_server_manager();
-    if (server_manager.ipc.is_open()) {
-        ser::EventMessage ipc_event;
-        ipc_event.event_code = IPCEventCodes::GameUpdate;
-
-        // Pass GameId and Lobby Properties
-        add_game_info(ipc_event.parameters);
-        ipc_event.parameters[DictKeyCodes::Properties::GameProperties] = std::make_shared<ser::Hashtable>(get_lobby_game_props());
-
-        // Send final message
-        server_manager.ipc.send_message(ipc_event);
-    }
+    ser::EventMessage ipc_event;
+    ipc_event.event_code = IPCEventCodes::GameUpdate;
+    add_game_info(ipc_event.parameters);
+    ipc_event.parameters[DictKeyCodes::Properties::GameProperties] = std::make_shared<ser::Hashtable>(get_lobby_game_props());
+    get_server_manager().ipc_broadcast(ipc_event);
 }
 
 #define PROP_MAP                                                                                                                                               \
@@ -407,7 +393,7 @@ ser::Value Game::get_game_prop(const ser::Value& key) {
             PROP_MAP
 #undef PROP_MAP_ENTRY
         case GameProps::PlayerCount:
-            return static_cast<uint8_t>(peers.size()) + dummy_peer_count;
+            return static_cast<uint8_t>(peers.size() + dummy_peer_count);
         }
     }
 
@@ -423,7 +409,7 @@ ser::Hashtable Game::get_lobby_game_props() const {
     ZoneScoped;
 
     ser::Hashtable fres;
-    fres[GameProps::PlayerCount] = static_cast<uint8_t>(peers.size()) + dummy_peer_count;
+    fres[GameProps::PlayerCount] = static_cast<uint8_t>(peers.size() + dummy_peer_count);
     fres[GameProps::IsOpen] = is_open;
     fres[GameProps::MaxPlayers] = max_peers;
 
@@ -441,7 +427,7 @@ ser::Hashtable Game::get_game_props(bool no_custom) {
 #define PROP_MAP_ENTRY(game_param, type, var, updates_lobby) fres[GameProps::game_param] = static_cast<type>(var);
     PROP_MAP
 #undef PROP_MAP_ENTRY
-    fres[GameProps::PlayerCount] = static_cast<uint8_t>(peers.size()) + dummy_peer_count;
+    fres[GameProps::PlayerCount] = static_cast<uint8_t>(peers.size() + dummy_peer_count);
 
     return fres;
 }
@@ -572,16 +558,8 @@ bool Game::matches_filter(const ser::Value& event_data, const ser::Hashtable& fi
 }
 
 GameInfo Game::decode_game_info(const ser::ParameterList& params) {
-    GameInfo fres;
+    GameInfo fres(Lobby::decode_lobby_info(params));
     for (const auto& [key, val] : params) {
-        if (key == DictKeyCodes::LoadBalancing::ApplicationId)
-            fres.app_id = val.get<std::string>();
-        if (key == DictKeyCodes::LoadBalancing::AppVersion)
-            fres.app_version = val.get<std::string>();
-        if (key == DictKeyCodes::AuthAndLobby::LobbyName)
-            fres.lobby_name = val.get<std::string>();
-        if (key == DictKeyCodes::AuthAndLobby::LobbyType)
-            fres.lobby_type = val.get<uint8_t>();
         if (key == DictKeyCodes::GameAndActor::GameId)
             fres.game_id = val.get<std::string>();
     }

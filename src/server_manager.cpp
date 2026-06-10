@@ -275,7 +275,7 @@ void ParseServersSection(ServerManagerConfig& config, Yaml::Node& section) {
             Yaml::Node& item = (*itemIt).second;
             const std::string item_path = std::format("{}[{}]", type_path, index);
 
-            ValidateAllowedKeys(item, item_path, {"port", "external_address", "address", "reauth", "allow_unsolicited", "subprocess", "stun_server"});
+            ValidateAllowedKeys(item, item_path, {"port", "external_address", "address", "allow_unsolicited", "subprocess", "stun_server"});
 
             ServerConfig server;
             server.type = type;
@@ -290,13 +290,7 @@ void ParseServersSection(ServerManagerConfig& config, Yaml::Node& section) {
             if (Yaml::Node& stun_node = item["stun_server"]; !stun_node.IsNone())
                 ParseStunServer(server, stun_node, item_path + ".stun_server");
 
-            config.servers.push_back(std::move(server));
-
             auto external_address = ReadOptionalExternalAddress(item, item_path);
-            const bool has_reauth = !item["reauth"].IsNone();
-
-            if (!external_address && has_reauth)
-                ThrowConfigError(item_path, "'reauth' requires 'external_address'");
 
             if (external_address) {
                 ServerEndpoint endpoint;
@@ -304,11 +298,10 @@ void ParseServersSection(ServerManagerConfig& config, Yaml::Node& section) {
                 endpoint.protocol = ServerProtocol::UDP;
                 endpoint.address = std::move(*external_address);
 
-                if (auto reauth = ReadOptionalScalar<bool>(item, "reauth", item_path))
-                    endpoint.reauth = *reauth;
-
                 config.endpoints.push_back(std::move(endpoint));
             }
+
+            config.servers.emplace_back(std::move(server));
         }
     }
 }
@@ -321,15 +314,12 @@ void ParseExternalSection(ServerManagerConfig& config, Yaml::Node& section) {
         Yaml::Node& item = (*it).second;
         const std::string item_path = std::format("External[{}]", index);
 
-        ValidateAllowedKeys(item, item_path, {"type", "protocol", "address", "reauth"});
+        ValidateAllowedKeys(item, item_path, {"type", "protocol", "address"});
 
         ServerEndpoint endpoint;
         endpoint.type = ReadRequiredServerType(item, "type", item_path);
         endpoint.protocol = ReadOptionalProtocol(item, "protocol", item_path, ServerProtocol::UDP);
         endpoint.address = ReadRequiredScalar<std::string>(item, "address", item_path);
-
-        if (auto reauth = ReadOptionalScalar<bool>(item, "reauth", item_path))
-            endpoint.reauth = *reauth;
 
         config.endpoints.push_back(std::move(endpoint));
     }
@@ -366,7 +356,7 @@ template <typename T> T *GetRawPointer(const std::shared_ptr<T>& ptr) { return p
 template <typename T> T *GetRawPointer(const std::unique_ptr<T>& ptr) { return ptr.get(); }
 } // namespace
 
-ServerManagerConfig ServerManager::receive_config_from_ipc(GameIPC& ipc) {
+ServerManagerConfig ServerManager::receive_config_from_ipc(IPC& ipc) {
     std::optional<luxon::ser::Message> msg;
 
     // Poll the non-blocking IPC socket until the parent transmits the configuration
@@ -443,11 +433,14 @@ ServerManagerConfig ServerManager::parse_config(const std::string& config_conten
 
 ServerManager::ServerManager(const std::string& config_file) : ServerManager(load_config_from_file(config_file)) {}
 
-ServerManager::ServerManager(ServerManagerConfig config, GameIPC&& ipc) : endpoints(std::move(config.endpoints)), ipc(std::move(ipc)) {
-    log_ = create_logger(this->ipc.is_open() ? std::format("Subprocess {} ServerManager", this->ipc.get_fd()) : "ServerManager");
+ServerManager::ServerManager(ServerManagerConfig config, IPC&& ipc) : endpoints(std::move(config.endpoints)), parent_ipc_(std::move(ipc)) {
+    log_ = create_logger(this->parent_ipc_.is_open() ? std::format("Subprocess {} ServerManager", this->parent_ipc_.get_fd()) : "ServerManager");
 #ifndef NDEBUG
     log_->set_level(log_level::trace);
 #endif
+
+    if (ipc.is_open())
+        is_subprocess_ = true;
 
     configs_ = std::move(config.servers);
     enable_ipv6_ = config.enable_ipv6;
@@ -472,23 +465,23 @@ ServerManager::ServerManager(ServerManagerConfig config, GameIPC&& ipc) : endpoi
     setup();
 }
 
-ServerManager::ServerManager(GameIPC&& ipc) : ServerManager(receive_config_from_ipc(ipc), std::move(ipc)) {}
+ServerManager::ServerManager(IPC&& ipc) : ServerManager(receive_config_from_ipc(ipc), std::move(ipc)) {}
 
-const std::string& ServerManager::get_endpoint_of(ServerType server_type, ServerProtocol server_proto) {
+const ServerEndpoint& ServerManager::get_endpoint_of(ServerType server_type, ServerProtocol server_proto) {
     ZoneScoped;
-    std::vector<const std::string *> candidates;
+    std::vector<const ServerEndpoint *> candidates;
     candidates.reserve(endpoints.size());
 
-    // Collect all valid addresses for requested type
+    // Collect all valid endpoints for requested type
     for (const auto& endpoint : endpoints)
         if (endpoint.type == server_type && endpoint.protocol == server_proto)
-            candidates.push_back(&endpoint.address);
+            candidates.push_back(&endpoint);
 
     // Handle cases where no config exists
     if (candidates.empty())
         throw std::runtime_error(std::format("No endpoint configuration found for {}", ServerTypeToString(server_type)));
 
-    // Returnrandom address from candidates
+    // Return random endpoint from candidates
     static std::mt19937 generator{1234};
     std::uniform_int_distribution<size_t> distribution(0, candidates.size() - 1);
     return *candidates[distribution(generator)];
@@ -624,6 +617,22 @@ bool ServerManager::run_once() {
         if (http_server_)
             http_server_->service_now();
 
+        // Receive and process an IPC message per child and parent
+        for (auto& [port, ipc] : subprocesses_)
+            if (ipc.is_open())
+                if (const auto ipc_msg = ipc.receive_message())
+                    process_child_ipc_message(ipc, *ipc_msg);
+        if (parent_ipc_.is_open())
+            if (const auto ipc_msg = parent_ipc_.receive_message())
+                process_parent_ipc_message(parent_ipc_, *ipc_msg);
+        ipc_broadcast_skip_ = nullptr;
+
+        // Stop if parent has died
+        if (is_subprocess_ && !parent_ipc_.is_open()) {
+            stop();
+            log_->info("Parent has closed the IPC connection. Stopping...");
+        }
+
         // End busy performance timer
         const auto end_time = std::chrono::steady_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
@@ -635,6 +644,27 @@ bool ServerManager::run_once() {
 
     FrameMark;
     return running_;
+}
+
+std::shared_ptr<App> ServerManager::get_app(const AppInfo& info) { return App::get(*this, std::string(info.app_id), std::string(info.app_version)); }
+std::shared_ptr<Lobby> ServerManager::get_lobby(App& app, const LobbyInfo& info) { return app.get_lobby(info); }
+std::expected<std::shared_ptr<Game>, std::string> ServerManager::get_game(Lobby& lobby, const GameInfo& info) {
+    auto game = lobby.create_game(std::string(info.game_id), true);
+    if (!game)
+        return std::unexpected(game.error().debug_message.value_or("Unknown error"));
+    return *game;
+}
+
+void ServerManager::ipc_broadcast(const ser::Message& message, bool parent, bool children) {
+    if (parent)
+        if (&parent_ipc_ != ipc_broadcast_skip_)
+            if (parent_ipc_.is_open())
+                parent_ipc_.send_message(message);
+    if (children)
+        for (auto& [port, ipc] : subprocesses_)
+            if (&ipc != ipc_broadcast_skip_)
+                if (ipc.is_open())
+                    ipc.send_message(message);
 }
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
@@ -656,24 +686,43 @@ void ServerManager::setup_http_server() {
 }
 #endif
 
-void ServerManager::process_ipc_message(const ser::Message& msg) {
+void ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& msg) {
+    ipc_broadcast_skip_ = &sender;
+
     // Only accept event messages
     auto *event_msg = std::get_if<ser::EventMessage>(&msg);
     if (!event_msg)
         return;
 
-    const auto& params = event_msg->parameters;
-    const auto game_info = Game::decode_game_info(params);
+    return process_ipc_event(*event_msg);
+}
+
+void ServerManager::process_parent_ipc_message(IPC& sender, const ser::Message& msg) {
+    ipc_broadcast_skip_ = &sender;
+
+    // Only accept event messages
+    auto *event_msg = std::get_if<ser::EventMessage>(&msg);
+    if (!event_msg)
+        return;
+
+    return process_ipc_event(*event_msg);
+}
+
+void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
+    const auto& params = event_msg.parameters;
 
     // Handle lobby/game updates
-    if (event_msg->event_code == IPCEventCodes::GameUpdate || event_msg->event_code == IPCEventCodes::GameDelete) {
+    if (event_msg.event_code == IPCEventCodes::GameUpdate || event_msg.event_code == IPCEventCodes::GameDelete) {
         // Find tracked external game
+        const auto game_info = Game::decode_game_info(params);
         auto it = std::find_if(external_games_.begin(), external_games_.end(), [&](const std::shared_ptr<Game>& g) { return g->matches_game_info(game_info); });
 
-        if (event_msg->event_code == IPCEventCodes::GameDelete) {
+        if (event_msg.event_code == IPCEventCodes::GameDelete) {
             // Handle game deletion
             if (it != external_games_.end()) {
                 auto game = *it;
+
+                log_->info("Received game deletion event via IPC for {}", game->id);
 
                 // Invoke deletion handlers
                 for (auto& handler : game->lobby->game_list_update_handlers)
@@ -686,7 +735,9 @@ void ServerManager::process_ipc_message(const ser::Message& msg) {
                 // Remove from external games tracking
                 external_games_.erase(it);
             }
-        } else if (event_msg->event_code == IPCEventCodes::GameUpdate) {
+
+            return;
+        } else if (event_msg.event_code == IPCEventCodes::GameUpdate) {
             // Handle game update
             std::shared_ptr<Game> game;
             bool is_new = false;
@@ -714,6 +765,8 @@ void ServerManager::process_ipc_message(const ser::Message& msg) {
                 }
             }
 
+            log_->info("Received game update event via IPC for {}", game->id);
+
             // Apply updated properties
             auto props_ptr = params[DictKeyCodes::Properties::GameProperties].get_or<ser::HashtablePtr>(nullptr);
             if (props_ptr) {
@@ -728,6 +781,59 @@ void ServerManager::process_ipc_message(const ser::Message& msg) {
                     game->insert_game_props(*props_ptr);
                 }
             }
+
+            return;
+        }
+    }
+
+    // Handle persistent peer stores/loads
+    if (event_msg.event_code == IPCEventCodes::PersistentPeerLoad || event_msg.event_code == IPCEventCodes::PersistentPeerStore) {
+        // Get token
+        std::string_view token;
+        if (const auto& token_param = params[DictKeyCodes::LoadBalancing::Token]; token_param.is<std::string>()) {
+            token = token_param.get<std::string>();
+        } else {
+            log_->error("Failed to decode persistent peer received via IPC: Could not get token string");
+            return;
+        }
+
+        if (event_msg.event_code == IPCEventCodes::PersistentPeerStore) {
+            // Get user id
+            std::string_view user_id;
+            if (const auto& user_id_param = params[DictKeyCodes::LoadBalancing::UserId]; user_id_param.is<std::string>()) {
+                user_id = user_id_param.get<std::string>();
+            } else {
+                log_->error("Failed to decode persistent peer received via IPC: Could not get user id string");
+                return;
+            }
+
+            log_->info("Received persistent peer store event via IPC for {}", user_id);
+
+            auto pp = create_persistent_peer();
+            pp->token = token;
+            pp->user_id = user_id;
+
+            const auto game_info = Game::decode_game_info(params);
+            pp->app = get_app(game_info);
+            if (!pp->app) {
+                log_->error("Failed to store persistent peer received via IPC: Could not get associated app");
+                return;
+            }
+
+            if (auto lobby = get_lobby(*pp->app, game_info))
+                pp->current_game = get_game(*lobby, game_info).value_or(nullptr);
+
+            store_persistent_peer(*this, std::move(pp));
+
+            return;
+        } else if (event_msg.event_code == IPCEventCodes::PersistentPeerLoad) {
+            auto pp = load_persistent_peer(*this, token, false);
+            if (pp)
+                log_->info("Received persistent peer load event via IPC for {}", pp->user_id);
+            else
+                log_->warn("Received persistent peer load event via IPC for unknown user");
+
+            return;
         }
     }
 }
@@ -900,14 +1006,14 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
         return;
     }
 
-    auto ipc_opt = GameIPC::create();
+    auto ipc_opt = IPC::create();
     if (!ipc_opt) {
-        log_->error("Failed to create GameIPC socket pair for port {}", config.port);
+        log_->error("Failed to create IPC socket pair for port {}", config.port);
         return;
     }
 
     // Emplace IPC into manager's tracked subprocesses
-    GameIPC& ipc = subprocesses_.try_emplace(config.port, std::move(*ipc_opt)).first->second;
+    IPC& ipc = subprocesses_.try_emplace(config.port, std::move(*ipc_opt)).first->second;
 
     // Trigger external subprocess logic using new child socket
     handle_start_subprocess(ipc.get_child_fd());
@@ -920,7 +1026,8 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
     child_config.max_game_peers = max_game_peers_;
     child_config.tick_time_budget = tick_time_budget_;
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
-    child_config.settings_database_path = settings_database_path + ":ro";
+    if (!settings_database_path.empty())
+        child_config.settings_database_path = settings_database_path + ":ro";
 #endif
 
     // Make sure child actually binds server and doesn't endlessly fork

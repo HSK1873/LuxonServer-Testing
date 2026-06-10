@@ -11,31 +11,31 @@
 namespace server {
 /// \brief Abstracts Inter-Process Communication (IPC) for games
 /// Provides reliable message stream
-class GameIPC {
+class IPC {
 public:
     ///
     /// \brief Creates new IPC channel
-    /// \return GameIPC instance if successful
+    /// \return IPC instance if successful
     ///
-    static std::optional<GameIPC> create();
+    static std::optional<IPC> create();
 
     ///
     /// \brief Constructs an empty, closed IPC channel
     ///
-    GameIPC() {}
+    IPC() {}
 
     ///
     /// \brief Connects to existing IPC channel using given file descriptor
     /// \param fd File descriptor to existing IPC socket
     ///
-    explicit GameIPC(int fd);
+    explicit IPC(int fd);
 
-    ~GameIPC();
+    ~IPC();
 
-    GameIPC(GameIPC&& other) noexcept;
-    GameIPC& operator=(GameIPC&& other) noexcept;
-    GameIPC(const GameIPC&) = delete;
-    GameIPC& operator=(const GameIPC&) = delete;
+    IPC(IPC&& other) noexcept;
+    IPC& operator=(IPC&& other) noexcept;
+    IPC(const IPC&) = delete;
+    IPC& operator=(const IPC&) = delete;
 
     ///
     /// \brief Returns fd for use in this process
@@ -72,7 +72,7 @@ public:
     bool is_open() const { return fd_ != -1; }
 
 private:
-    GameIPC(int parent_fd, int child_fd);
+    IPC(int parent_fd, int child_fd);
 
     int fd_{-1};
     int child_fd_{-1};

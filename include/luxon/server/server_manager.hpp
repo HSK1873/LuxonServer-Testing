@@ -9,7 +9,7 @@
 #include "string_hash.hpp"
 #include "logger.hpp"
 #include "hookpoints.hpp"
-#include "game_ipc.hpp"
+#include "ipc.hpp"
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
 #include "settings_manager.hpp"
 #endif
@@ -73,7 +73,6 @@ struct ServerEndpoint {
     ServerType type = ServerType::None;
     ServerProtocol protocol{};
     std::string address;
-    bool reauth = false;
 };
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
@@ -138,8 +137,8 @@ struct ServerManagerConfig {
     ///
     /// \brief Add an externally reachable endpoint
     ///
-    ServerManagerConfig& add_endpoint(ServerType type, ServerProtocol protocol, std::string address, bool reauth) {
-        endpoints.push_back({type, protocol, std::move(address), reauth});
+    ServerManagerConfig& add_endpoint(ServerType type, ServerProtocol protocol, std::string address) {
+        endpoints.push_back({type, protocol, std::move(address)});
         return *this;
     }
 
@@ -173,7 +172,6 @@ public:
     std::unordered_map<std::pair<std::string, std::string>, std::weak_ptr<App>, StringPairHasher> apps;
     std::vector<std::unique_ptr<PeerPersistent>> peer_persistent_data;
     std::vector<ServerEndpoint> endpoints;
-    GameIPC ipc;
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
     std::optional<SettingsManager> settings_manager;
     std::string settings_database_path;
@@ -191,7 +189,10 @@ private:
     std::shared_ptr<logger> log_;
     std::vector<ServerConfig> configs_;
     std::unordered_map<uint16_t, enet::EnetServer> servers_;
-    std::unordered_map<uint16_t, GameIPC> subprocesses_;
+    IPC parent_ipc_;
+    IPC *ipc_broadcast_skip_{};
+    bool is_subprocess_{};
+    std::unordered_map<uint16_t, IPC> subprocesses_;
     decltype(servers_)::iterator next_server_it_;
     std::list<HandlerPtr<HandlerBase>> connections_;
     std::vector<std::shared_ptr<Game>> external_games_;
@@ -232,7 +233,9 @@ private:
     void setup_http_server();
 #endif
 
-    void process_ipc_message(const luxon::ser::Message& msg);
+    void process_child_ipc_message(IPC& sender, const luxon::ser::Message& msg);
+    void process_parent_ipc_message(IPC& sender, const luxon::ser::Message& msg);
+    void process_ipc_event(const ser::EventMessage& event_msg);
 
     void run_scheduled_tasks();
     void stun_keepalive(enet::EnetServer& server, uint16_t port);
@@ -250,18 +253,18 @@ public:
     ///
     /// \brief Construct manager directly from C++ configuration
     ///
-    explicit ServerManager(ServerManagerConfig config, GameIPC&& ipc = {});
+    explicit ServerManager(ServerManagerConfig config, IPC&& ipc = {});
 
     ///
     /// \brief Construct manager from IPC child fd
     /// \note Configuration will be received from parent via IPC
     ///
-    explicit ServerManager(GameIPC&& ipc);
+    explicit ServerManager(IPC&& ipc);
 
     ///
     /// \brief Receive ServerManagerConfig from parent
     ///
-    static ServerManagerConfig receive_config_from_ipc(GameIPC& ipc);
+    static ServerManagerConfig receive_config_from_ipc(IPC& ipc);
 
     ///
     /// \brief Load ServerManagerConfig from YAML file
@@ -300,12 +303,50 @@ public:
     }
 
     ///
+    /// \brief Retrieves an application instance based on the provided info
+    /// \param info Identifying information for the target application
+    /// \return Shared pointer to the application
+    ///
+    std::shared_ptr<App> get_app(const AppInfo& info);
+
+    ///
+    /// \brief Retrieves a lobby instance within a specific application
+    /// \param app Parent application hosting the lobby
+    /// \param info Identifying information for the target lobby
+    /// \return Shared pointer to the lobby
+    ///
+    std::shared_ptr<Lobby> get_lobby(App& app, const LobbyInfo& info);
+
+    ///
+    /// \brief Retrieves a game instance within a specific lobby
+    /// \param lobby Parent lobby hosting the game
+    /// \param info Identifying information for the target game
+    /// \return Expected containing a shared pointer to the game on success, or an error message string on failure
+    ///
+    std::expected<std::shared_ptr<Game>, std::string> get_game(Lobby& lobby, const GameInfo& info);
+
+    ///
+    /// \brief Broadcasts a serialized message via IPC to parent and/or child processes
+    /// \param message The serialized message payload to send
+    /// \param parent True to transmit the message to the parent process
+    /// \param children True to transmit the message to all child subprocesses
+    /// \param skip Optional IPC connection pointer to exclude from the broadcast (e.g., the original sender)
+    ///
+    void ipc_broadcast(const ser::Message& message, bool parent, bool children);
+
+    ///
+    /// \brief Broadcasts a serialized message via IPC to all connected processes (parent and children)
+    /// \param message The serialized message payload to send
+    /// \param skip Optional IPC connection pointer to exclude from the broadcast (e.g., the original sender)
+    ///
+    void ipc_broadcast(const ser::Message& message) { return ipc_broadcast(message, true, true); }
+    ///
     /// \brief Gets the external address of a random server of given type
     /// \param server_type Type of server to get
     /// \param server_proto Protocol of server to get
     /// \return Externally reachable address of server, e.g. "104.18.26.120:5058"
     ///
-    const std::string& get_endpoint_of(ServerType server_type, ServerProtocol server_proto);
+    const ServerEndpoint& get_endpoint_of(ServerType server_type, ServerProtocol server_proto);
 
     ///
     /// \brief Gets a list of active connections to this instance

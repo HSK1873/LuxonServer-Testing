@@ -44,9 +44,8 @@ class App;
 struct Lobby;
 struct Peer;
 
-struct GameInfo {
-    std::string_view app_id, app_version, lobby_name, game_id;
-    uint8_t lobby_type{};
+struct GameInfo : public LobbyInfo {
+    std::string_view game_id;
 };
 
 struct GamePeer {

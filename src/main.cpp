@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "luxon/server/server_manager.hpp"
-#include "luxon/server/game_ipc.hpp"
+#include "luxon/server/ipc.hpp"
 #include "platform.hpp"
 
 #include <print>
@@ -15,9 +15,13 @@
 #include <windows.h>
 #include <io.h>
 #else
+#include <cerrno>
 #include <unistd.h>
 #include <sys/types.h>
-#include <cerrno>
+#ifdef __linux__
+#include <csignal>
+#include <sys/prctl.h>
+#endif
 #endif
 
 int main(int argc, char *argv[]) {
@@ -25,9 +29,13 @@ int main(int argc, char *argv[]) {
 
     // If spawned as a subprocess intercept CLI flag and run as child
     if (argc >= 3 && std::string_view(argv[1]) == "--child-fd") {
+#ifdef __linux__
+        prctl(PR_SET_PDEATHSIG, SIGINT);
+
+#endif
         int child_fd = std::stoi(argv[2]);
         try {
-            server::ServerManager child_manager((server::GameIPC(child_fd)));
+            server::ServerManager child_manager((server::IPC(child_fd)));
             child_manager.run();
         } catch (const std::exception& e) {
             std::println("std::terminate about to be called in subprocess: {}", e.what());

@@ -51,7 +51,11 @@ struct Lobby : std::enable_shared_from_this<Lobby> {
     size_t get_peer_count() const;
     size_t get_master_peer_count() const;
 
+    void add_lobby_info(ser::ParameterList& params);
+
     // Returns exceptions with user error strings!
     std::vector<std::string> query_lobbies(const std::string& sql_queries);
+
+    static struct LobbyInfo decode_lobby_info(const ser::ParameterList& params);
 };
 } // namespace server

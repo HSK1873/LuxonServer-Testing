@@ -4,6 +4,6 @@
 
 namespace server {
 namespace IPCEventCodes {
-enum Enum : uint8_t { GameUpdate, GameDelete };
+enum Enum : uint8_t { GameUpdate, GameDelete, PersistentPeerStore, PersistentPeerLoad };
 }
 } // namespace server
