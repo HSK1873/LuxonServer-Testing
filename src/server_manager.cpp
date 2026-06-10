@@ -145,8 +145,6 @@ HandlerPtr<HandlerBase> ServerTypeToHandler(ServerType type, ServerManager& serv
     }
 }
 
-bool IsServerTypeSection(std::string_view key) { return key == "NameServer" || key == "MasterServer" || key == "GameServer"; }
-
 uint8_t NormalizeMaxGamePeers(unsigned value) {
     uint8_t normalized = static_cast<uint8_t>(std::min<unsigned>(value, 255));
     if (normalized == 255)
@@ -154,106 +152,217 @@ uint8_t NormalizeMaxGamePeers(unsigned value) {
     return normalized;
 }
 
-template <typename Fn> void ForEachSequenceItem(Yaml::Node& section, Fn&& fn) {
-    if (!section.IsSequence())
-        return;
-
-    for (auto itemIt = section.Begin(); itemIt != section.End(); itemIt++)
-        fn((*itemIt).second);
+[[noreturn]]
+void ThrowConfigError(std::string_view path, std::string_view message) {
+    throw std::runtime_error(std::format("Config error at {}: {}", path, message));
 }
 
-void ParseServerSection(ServerManagerConfig& config, ServerType current_type, Yaml::Node& section) {
-    struct {
-        bool allow_unsolicited = false;
-        bool subprocess = false;
-        std::string stun_host;
-        uint16_t stun_port = 19302;
-    } state;
+void ExpectMap(Yaml::Node& node, std::string_view path) {
+    if (!node.IsMap())
+        ThrowConfigError(path, "expected a map");
+}
 
-    ForEachSequenceItem(section, [&](Yaml::Node& item) {
-        if (!item["allow_unsolicited"].IsNone())
-            state.allow_unsolicited = item["allow_unsolicited"].As<bool>();
+void ExpectSequence(Yaml::Node& node, std::string_view path) {
+    if (!node.IsSequence())
+        ThrowConfigError(path, "expected a sequence");
+}
 
-        if (!item["subprocess"].IsNone())
-            state.subprocess = item["subprocess"].As<bool>();
+void ValidateAllowedKeys(Yaml::Node& map, std::string_view path, std::initializer_list<std::string_view> allowed) {
+    ExpectMap(map, path);
 
-        if (!item["stun_server"].IsNone()) {
-            Yaml::Node& stun = item["stun_server"];
+    for (auto it = map.Begin(); it != map.End(); it++) {
+        std::string_view key = (*it).first;
+        if (std::find(allowed.begin(), allowed.end(), key) == allowed.end())
+            ThrowConfigError(path, std::format("unknown key '{}'", key));
+    }
+}
 
-            if (stun.IsScalar()) {
-                state.stun_host = stun.As<std::string>();
-            } else if (stun.IsSequence()) {
-                ForEachSequenceItem(stun, [&](Yaml::Node& entry) {
-                    if (!entry["host"].IsNone())
-                        state.stun_host = entry["host"].As<std::string>();
+template <typename T> T ReadNodeScalar(Yaml::Node& node, std::string_view path) {
+    try {
+        return node.As<T>();
+    } catch (const std::exception& e) {
+        ThrowConfigError(path, e.what());
+    }
+}
 
-                    if (!entry["port"].IsNone())
-                        state.stun_port = entry["port"].As<uint16_t>();
-                });
-            } else {
-                throw std::runtime_error("stun_server must be either a string or a sequence");
+template <typename T> std::optional<T> ReadOptionalScalar(Yaml::Node& map, const char *key, std::string_view path) {
+    Yaml::Node& child = map[key];
+    if (child.IsNone())
+        return std::nullopt;
+
+    return ReadNodeScalar<T>(child, std::format("{}.{}", path, key));
+}
+
+template <typename T> T ReadRequiredScalar(Yaml::Node& map, const char *key, std::string_view path) {
+    auto value = ReadOptionalScalar<T>(map, key, path);
+    if (!value)
+        ThrowConfigError(path, std::format("missing required key '{}'", key));
+    return std::move(*value);
+}
+
+ServerType ReadRequiredServerType(Yaml::Node& map, const char *key, std::string_view path) {
+    const auto value = ReadRequiredScalar<std::string>(map, key, path);
+    try {
+        return StringToServerType(value);
+    } catch (const std::exception& e) {
+        ThrowConfigError(std::format("{}.{}", path, key), e.what());
+    }
+}
+
+ServerProtocol ReadOptionalProtocol(Yaml::Node& map, const char *key, std::string_view path, ServerProtocol fallback = ServerProtocol::UDP) {
+    auto value = ReadOptionalScalar<std::string>(map, key, path);
+    if (!value)
+        return fallback;
+
+    try {
+        return StringToEndpointProtocol(*value);
+    } catch (const std::exception& e) {
+        ThrowConfigError(std::format("{}.{}", path, key), e.what());
+    }
+}
+
+std::optional<std::string> ReadOptionalExternalAddress(Yaml::Node& map, std::string_view path) {
+    // `address` is accepted as a legacy alias for `external_address`
+    auto external_address = ReadOptionalScalar<std::string>(map, "external_address", path);
+    auto legacy_address = ReadOptionalScalar<std::string>(map, "address", path);
+
+    if (external_address && legacy_address)
+        ThrowConfigError(path, "use only one of 'external_address' or 'address'");
+
+    if (external_address)
+        return std::move(*external_address);
+    if (legacy_address)
+        return std::move(*legacy_address);
+    return std::nullopt;
+}
+
+void ParseStunServer(ServerConfig& server, Yaml::Node& stun_node, const std::string& path) {
+    if (stun_node.IsScalar()) {
+        server.stun_server_host = ReadNodeScalar<std::string>(stun_node, path);
+        server.stun_server_port = 19302;
+        return;
+    }
+
+    if (!stun_node.IsMap())
+        ThrowConfigError(path, "expected a string or a map");
+
+    ValidateAllowedKeys(stun_node, path, {"host", "port"});
+
+    server.stun_server_host = ReadRequiredScalar<std::string>(stun_node, "host", path);
+    if (auto port = ReadOptionalScalar<uint16_t>(stun_node, "port", path))
+        server.stun_server_port = *port;
+}
+
+void ParseServersSection(ServerManagerConfig& config, Yaml::Node& section) {
+    ExpectMap(section, "Servers");
+
+    for (auto it = section.Begin(); it != section.End(); it++) {
+        const std::string type_name = (*it).first;
+        Yaml::Node& list = (*it).second;
+        const std::string type_path = std::format("Servers.{}", type_name);
+
+        ServerType type;
+        try {
+            type = StringToServerType(type_name);
+        } catch (const std::exception& e) {
+            ThrowConfigError(type_path, e.what());
+        }
+
+        ExpectSequence(list, type_path);
+
+        size_t index = 0;
+        for (auto itemIt = list.Begin(); itemIt != list.End(); itemIt++, ++index) {
+            Yaml::Node& item = (*itemIt).second;
+            const std::string item_path = std::format("{}[{}]", type_path, index);
+
+            ValidateAllowedKeys(item, item_path, {"port", "external_address", "address", "reauth", "allow_unsolicited", "subprocess", "stun_server"});
+
+            ServerConfig server;
+            server.type = type;
+            server.port = ReadRequiredScalar<uint16_t>(item, "port", item_path);
+
+            if (auto allow_unsolicited = ReadOptionalScalar<bool>(item, "allow_unsolicited", item_path))
+                server.allow_unsolicited = *allow_unsolicited;
+
+            if (auto subprocess = ReadOptionalScalar<bool>(item, "subprocess", item_path))
+                server.subprocess = *subprocess;
+
+            if (Yaml::Node& stun_node = item["stun_server"]; !stun_node.IsNone())
+                ParseStunServer(server, stun_node, item_path + ".stun_server");
+
+            config.servers.push_back(std::move(server));
+
+            auto external_address = ReadOptionalExternalAddress(item, item_path);
+            const bool has_reauth = !item["reauth"].IsNone();
+
+            if (!external_address && has_reauth)
+                ThrowConfigError(item_path, "'reauth' requires 'external_address'");
+
+            if (external_address) {
+                ServerEndpoint endpoint;
+                endpoint.type = type;
+                endpoint.protocol = ServerProtocol::UDP;
+                endpoint.address = std::move(*external_address);
+
+                if (auto reauth = ReadOptionalScalar<bool>(item, "reauth", item_path))
+                    endpoint.reauth = *reauth;
+
+                config.endpoints.push_back(std::move(endpoint));
             }
         }
-
-        if (!item["port"].IsNone()) {
-            config.servers.push_back(
-                {current_type, item["port"].As<uint16_t>(), state.allow_unsolicited, state.subprocess, std::move(state.stun_host), state.stun_port});
-            state = {};
-        }
-
-        if (!item["address"].IsNone())
-            config.endpoints.push_back({current_type, ServerProtocol::UDP, item["address"].As<std::string>(), state.allow_unsolicited});
-    });
+    }
 }
 
 void ParseExternalSection(ServerManagerConfig& config, Yaml::Node& section) {
-    ForEachSequenceItem(section, [&](Yaml::Node& item) {
-        ServerType ext_type = ServerType::None;
-        ServerProtocol ext_proto = ServerProtocol::UDP;
-        std::string ext_addr;
-        bool addr_found = false;
+    ExpectSequence(section, "External");
 
-        if (!item["type"].IsNone())
-            ext_type = StringToServerType(item["type"].As<std::string>());
+    size_t index = 0;
+    for (auto it = section.Begin(); it != section.End(); it++, ++index) {
+        Yaml::Node& item = (*it).second;
+        const std::string item_path = std::format("External[{}]", index);
 
-        if (!item["protocol"].IsNone())
-            ext_proto = StringToEndpointProtocol(item["protocol"].As<std::string>());
+        ValidateAllowedKeys(item, item_path, {"type", "protocol", "address", "reauth"});
 
-        if (!item["address"].IsNone()) {
-            ext_addr = item["address"].As<std::string>();
-            addr_found = true;
-        }
+        ServerEndpoint endpoint;
+        endpoint.type = ReadRequiredServerType(item, "type", item_path);
+        endpoint.protocol = ReadOptionalProtocol(item, "protocol", item_path, ServerProtocol::UDP);
+        endpoint.address = ReadRequiredScalar<std::string>(item, "address", item_path);
 
-        if (ext_type != ServerType::None && addr_found)
-            config.endpoints.push_back({ext_type, ext_proto, std::move(ext_addr)});
-    });
+        if (auto reauth = ReadOptionalScalar<bool>(item, "reauth", item_path))
+            endpoint.reauth = *reauth;
+
+        config.endpoints.push_back(std::move(endpoint));
+    }
 }
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
 void ParseHttpSection(ServerManagerConfig& config, Yaml::Node& section) {
+    ValidateAllowedKeys(section, "HTTP", {"enabled", "active", "address", "port"});
+
+    const bool has_enabled = !section["enabled"].IsNone();
+    const bool has_active = !section["active"].IsNone();
+    if (has_enabled && has_active)
+        ThrowConfigError("HTTP", "use only one of 'enabled' or 'active'");
+
     HttpServerConfig http_cfg;
-    bool seen_any_item = false;
 
-    ForEachSequenceItem(section, [&](Yaml::Node& item) {
-        seen_any_item = true;
+    if (has_enabled)
+        http_cfg.enabled = ReadRequiredScalar<bool>(section, "enabled", "HTTP");
+    else if (has_active)
+        http_cfg.enabled = ReadRequiredScalar<bool>(section, "active", "HTTP");
 
-        if (!item["active"].IsNone())
-            http_cfg.enabled = item["active"].As<bool>();
-        if (!item["address"].IsNone())
-            http_cfg.address = item["address"].As<std::string>();
-        if (!item["port"].IsNone())
-            http_cfg.port = item["port"].As<uint16_t>();
-    });
+    if (auto address = ReadOptionalScalar<std::string>(section, "address", "HTTP"))
+        http_cfg.address = std::move(*address);
 
-    if (seen_any_item)
-        config.http = std::move(http_cfg);
+    if (auto port = ReadOptionalScalar<uint16_t>(section, "port", "HTTP"))
+        http_cfg.port = *port;
+
+    config.http = std::move(http_cfg);
 }
 #endif
 
 template <typename T> T *GetRawPointer(T *ptr) { return ptr; }
-
 template <typename T> T *GetRawPointer(const std::shared_ptr<T>& ptr) { return ptr.get(); }
-
 template <typename T> T *GetRawPointer(const std::unique_ptr<T>& ptr) { return ptr.get(); }
 } // namespace
 
@@ -289,37 +398,43 @@ ServerManagerConfig ServerManager::parse_config(const std::string& config_conten
     if (!root.IsMap())
         throw std::runtime_error("Root of config must be a map");
 
+    if (!root["MaxConnections"].IsNone() && !root["CCU"].IsNone())
+        ThrowConfigError("root", "use only one of 'MaxConnections' or 'CCU'");
+
     ServerManagerConfig config;
 
     for (auto it = root.Begin(); it != root.End(); it++) {
         std::string key = (*it).first;
         Yaml::Node& section = (*it).second;
 
-        if (IsServerTypeSection(key)) {
-            ParseServerSection(config, StringToServerType(key), section);
+        if (key == "Servers") {
+            ParseServersSection(config, section);
         } else if (key == "External") {
             ParseExternalSection(config, section);
         } else if (key == "EnableIPv6") {
-            if (!section.IsNone())
-                config.enable_ipv6 = section.As<bool>();
+            config.enable_ipv6 = ReadNodeScalar<bool>(section, "EnableIPv6");
         } else if (key == "MaxConnections" || key == "CCU") {
-            if (!section.IsNone())
-                config.max_connections = section.As<unsigned>();
+            config.max_connections = ReadNodeScalar<unsigned>(section, key);
         } else if (key == "MaxGamePeers") {
-            if (!section.IsNone())
-                config.max_game_peers = section.As<unsigned>();
+            config.max_game_peers = ReadNodeScalar<unsigned>(section, "MaxGamePeers");
         } else if (key == "TickTimeBudget") {
-            if (!section.IsNone())
-                config.tick_time_budget = section.As<uint32_t>();
+            config.tick_time_budget = ReadNodeScalar<uint32_t>(section, "TickTimeBudget");
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
         } else if (key == "SettingsDatabase") {
-            if (!section.IsNone())
-                config.settings_database_path = section.As<std::string>();
+            config.settings_database_path = ReadNodeScalar<std::string>(section, "SettingsDatabase");
+#else
+        } else if (key == "SettingsDatabase") {
+            // Accepted but ignored when settings DB support is not compiled in
 #endif
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
         } else if (key == "HTTP") {
             ParseHttpSection(config, section);
+#else
+        } else if (key == "HTTP") {
+            // Accepted but ignored when embedded HTTP support is not compiled in
 #endif
+        } else {
+            ThrowConfigError(key, "unknown top-level key: " + key);
         }
     }
 
@@ -536,7 +651,8 @@ void ServerManager::setup_http_server() {
         std::bind(&SockSelector::add_read_fd, &sock_selector_, std::placeholders::_1, [this](int fd) { http_server_->service_later(fd); });
     http_server_->on_delete_fd = std::bind(&SockSelector::remove_read_fd, &sock_selector_, std::placeholders::_1);
 #endif
-    http_server_->bind(http_config_->address, http_config_->port);
+    if (!http_server_->bind(http_config_->address, http_config_->port))
+        log_->error("Failed to bind HTTP server to port {}! Is the port already in use?", http_config_->port);
 }
 #endif
 
