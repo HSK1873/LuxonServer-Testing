@@ -72,7 +72,9 @@ struct ServerConfig {
 struct ServerEndpoint {
     ServerType type = ServerType::None;
     ServerProtocol protocol{};
-    std::string address;};
+    std::string address;
+    bool reauth = false;
+};
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
 struct HttpServerConfig {
@@ -136,8 +138,8 @@ struct ServerManagerConfig {
     ///
     /// \brief Add an externally reachable endpoint
     ///
-    ServerManagerConfig& add_endpoint(ServerType type, ServerProtocol protocol, std::string address) {
-        endpoints.push_back({type, protocol, std::move(address)});
+    ServerManagerConfig& add_endpoint(ServerType type, ServerProtocol protocol, std::string address, bool reauth) {
+        endpoints.push_back({type, protocol, std::move(address), reauth});
         return *this;
     }
 

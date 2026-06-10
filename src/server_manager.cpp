@@ -202,7 +202,7 @@ void ParseServerSection(ServerManagerConfig& config, ServerType current_type, Ya
         }
 
         if (!item["address"].IsNone())
-            config.endpoints.push_back({current_type, ServerProtocol::UDP, item["address"].As<std::string>()});
+            config.endpoints.push_back({current_type, ServerProtocol::UDP, item["address"].As<std::string>(), state.allow_unsolicited});
     });
 }
 
@@ -541,7 +541,79 @@ void ServerManager::setup_http_server() {
 #endif
 
 void ServerManager::process_ipc_message(const ser::Message& msg) {
-    // Populate/update/delete games in external_games_, see game.cpp
+    // Only accept event messages
+    auto *event_msg = std::get_if<ser::EventMessage>(&msg);
+    if (!event_msg)
+        return;
+
+    const auto& params = event_msg->parameters;
+    const auto game_info = Game::decode_game_info(params);
+
+    // Handle lobby/game updates
+    if (event_msg->event_code == IPCEventCodes::GameUpdate || event_msg->event_code == IPCEventCodes::GameDelete) {
+        // Find tracked external game
+        auto it = std::find_if(external_games_.begin(), external_games_.end(), [&](const std::shared_ptr<Game>& g) { return g->matches_game_info(game_info); });
+
+        if (event_msg->event_code == IPCEventCodes::GameDelete) {
+            // Handle game deletion
+            if (it != external_games_.end()) {
+                auto game = *it;
+
+                // Invoke deletion handlers
+                for (auto& handler : game->lobby->game_list_update_handlers)
+                    if (handler.game_delete)
+                        handler.game_delete(game.get());
+
+                // Make sure game expires immediately
+                (*it)->empty_game_ttl = 0;
+
+                // Remove from external games tracking
+                external_games_.erase(it);
+            }
+        } else if (event_msg->event_code == IPCEventCodes::GameUpdate) {
+            // Handle game update
+            std::shared_ptr<Game> game;
+            bool is_new = false;
+
+            // If known, reuse it. Otherwise, create new external game
+            if (it != external_games_.end()) {
+                game = *it;
+            } else {
+                auto app = App::get(*this, std::string(game_info.app_id), std::string(game_info.app_version));
+                if (!app)
+                    return;
+
+                auto lobby = app->get_lobby({game_info.lobby_name, game_info.lobby_type});
+                if (!lobby)
+                    return;
+
+                auto expected_game = lobby->create_game(std::string(game_info.game_id));
+                if (expected_game) {
+                    game = std::move(expected_game.value());
+
+                    // Persist locally
+                    external_games_.push_back(game);
+                    lobby->games[game->id] = game;
+                    is_new = true;
+                }
+            }
+
+            // Apply updated properties
+            auto props_ptr = params[DictKeyCodes::Properties::GameProperties].get_or<ser::HashtablePtr>(nullptr);
+            if (props_ptr) {
+                // Apply updated properties
+                auto props_ptr = params[DictKeyCodes::Properties::GameProperties].get_or<ser::HashtablePtr>(nullptr);
+                if (props_ptr) {
+                    // Handle PlayerCount separately
+                    if (auto it = props_ptr->find(GameProps::PlayerCount); it != props_ptr->end())
+                        it->second.store_if<uint8_t>(game->dummy_peer_count);
+
+                    // Apply all other properties
+                    game->insert_game_props(*props_ptr);
+                }
+            }
+        }
+    }
 }
 
 void ServerManager::setup() {

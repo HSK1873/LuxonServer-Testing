@@ -81,20 +81,20 @@ void Game::add_game_info(ser::ParameterList& params) {
     params[DictKeyCodes::LoadBalancing::AppVersion] = std::string(lobby->app->version);
 }
 
-bool Game::matches(const ser::ParameterList& params) const {
-    if (params[DictKeyCodes::GameAndActor::GameId] != id)
+bool Game::matches_game_info(const GameInfo& info) const {
+    if (info.game_id != id)
         return false;
 
-    if (params[DictKeyCodes::AuthAndLobby::LobbyName] != lobby->name)
+    if (info.lobby_name != lobby->name)
         return false;
 
-    if (params[DictKeyCodes::AuthAndLobby::LobbyType] != lobby->type)
+    if (info.lobby_type != lobby->type)
         return false;
 
-    if (params[DictKeyCodes::LoadBalancing::ApplicationId].get_or<std::string>() != lobby->app->id)
+    if (info.app_id != lobby->app->id)
         return false;
 
-    if (params[DictKeyCodes::LoadBalancing::AppVersion].get_or<std::string>() != std::string(lobby->app->version))
+    if (info.app_version != lobby->app->version)
         return false;
 
     return true;
@@ -326,7 +326,7 @@ std::pair<int16_t, std::string_view> Game::validate_join(const std::string& user
 
     // Check capacity (peers + expected users)
     if (max_peers > 0) {
-        const size_t current_count = peers.size();
+        const size_t current_count = peers.size() + dummy_peer_count;
         const size_t reserved_count = expected_users.size();
 
         // Expected users don't consume at slot
@@ -348,7 +348,7 @@ std::pair<int16_t, std::string_view> Game::validate_join(const std::string& user
                 return {ErrorCodes::Matchmaking::GameFull, "Game is full"};
 
         // Return error if actor list is full
-        if (peers.size() + needed_slots > 0xfe)
+        if (current_count + needed_slots > 0xfe)
             return {ErrorCodes::Matchmaking::ActorListFull, "Game is full"};
     }
 
@@ -407,7 +407,7 @@ ser::Value Game::get_game_prop(const ser::Value& key) {
             PROP_MAP
 #undef PROP_MAP_ENTRY
         case GameProps::PlayerCount:
-            return static_cast<uint8_t>(peers.size());
+            return static_cast<uint8_t>(peers.size()) + dummy_peer_count;
         }
     }
 
@@ -423,7 +423,7 @@ ser::Hashtable Game::get_lobby_game_props() const {
     ZoneScoped;
 
     ser::Hashtable fres;
-    fres[GameProps::PlayerCount] = static_cast<uint8_t>(peers.size());
+    fres[GameProps::PlayerCount] = static_cast<uint8_t>(peers.size()) + dummy_peer_count;
     fres[GameProps::IsOpen] = is_open;
     fres[GameProps::MaxPlayers] = max_peers;
 
@@ -441,7 +441,7 @@ ser::Hashtable Game::get_game_props(bool no_custom) {
 #define PROP_MAP_ENTRY(game_param, type, var, updates_lobby) fres[GameProps::game_param] = static_cast<type>(var);
     PROP_MAP
 #undef PROP_MAP_ENTRY
-    fres[GameProps::PlayerCount] = static_cast<uint8_t>(peers.size());
+    fres[GameProps::PlayerCount] = static_cast<uint8_t>(peers.size()) + dummy_peer_count;
 
     return fres;
 }
@@ -569,5 +569,22 @@ bool Game::matches_filter(const ser::Value& event_data, const ser::Hashtable& fi
     }
 
     return true;
+}
+
+GameInfo Game::decode_game_info(const ser::ParameterList& params) {
+    GameInfo fres;
+    for (const auto& [key, val] : params) {
+        if (key == DictKeyCodes::LoadBalancing::ApplicationId)
+            fres.app_id = val.get<std::string>();
+        if (key == DictKeyCodes::LoadBalancing::AppVersion)
+            fres.app_version = val.get<std::string>();
+        if (key == DictKeyCodes::AuthAndLobby::LobbyName)
+            fres.lobby_name = val.get<std::string>();
+        if (key == DictKeyCodes::AuthAndLobby::LobbyType)
+            fres.lobby_type = val.get<uint8_t>();
+        if (key == DictKeyCodes::GameAndActor::GameId)
+            fres.game_id = val.get<std::string>();
+    }
+    return fres;
 }
 } // namespace server
