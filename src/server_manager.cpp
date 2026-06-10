@@ -737,10 +737,10 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
     child_config.endpoints = endpoints;
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
-    // Disable embedded HTTP server on child
+    // Set up embedded HTTP server on child
     if (http_config_) {
         child_config.http = http_config_;
-        child_config.http->enabled = false;
+        child_config.http->port += ipc.get_fd(); // Use a different port
     }
 #endif
 
