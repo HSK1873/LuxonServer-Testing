@@ -62,9 +62,11 @@
 #include "handler_nameserver.hpp"
 #include "handler_masterserver.hpp"
 #include "handler_gameserver.hpp"
+#include "yaml.hpp"
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
 #include "ipc_codes.hpp"
 #include "pfr_codec.hpp"
-#include "yaml.hpp"
+#endif
 
 #include <iostream>
 #include <string_view>

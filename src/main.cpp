@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "luxon/server/server_manager.hpp"
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
 #include "luxon/server/ipc.hpp"
+#endif
 #include "platform.hpp"
 
 #include <print>
