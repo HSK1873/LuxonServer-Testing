@@ -77,7 +77,8 @@ private:
     int fd_{-1};
     int child_fd_{-1};
 
-    // Buffer to handle stream fragmentation
+    // Buffers to handle stream fragmentation
     std::vector<uint8_t> recv_buffer_;
+    std::vector<uint8_t> send_buffer_;
 };
 } // namespace server

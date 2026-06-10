@@ -87,17 +87,27 @@ void GameIPC::send_message(const luxon::ser::Message& msg) {
     frame.insert(frame.end(), len_ptr, len_ptr + sizeof(network_len));
     frame.insert(frame.end(), payload.begin(), payload.end());
 
-    // Flush to socket
+    // Queue new frame in send buffer
+    send_buffer_.insert(send_buffer_.end(), frame.begin(), frame.end());
+
+    // Flush as much as possible to socket
     size_t written = 0;
-    while (written < frame.size()) {
-        ssize_t res = send(fd_, frame.data() + written, frame.size() - written, MSG_NOSIGNAL);
+    while (written < send_buffer_.size()) {
+        ssize_t res = send(fd_, send_buffer_.data() + written, send_buffer_.size() - written, MSG_NOSIGNAL);
         if (res < 0) {
             if (errno == EINTR)
                 continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                break; // Socket is full, retain remaining data in buffer for next call
+
             throw std::runtime_error("Unrecoverable communication error in Game IPC: Connection reset?");
         }
         written += res;
     }
+
+    // Erase bytes that were successfully sent
+    if (written > 0)
+        send_buffer_.erase(send_buffer_.begin(), send_buffer_.begin() + written);
 }
 
 std::optional<luxon::ser::Message> GameIPC::receive_message() {

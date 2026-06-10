@@ -154,7 +154,8 @@ if (WASI)
     target_link_libraries(luxon_server_lib PUBLIC wasm_sockets)
 endif()
 
-add_executable(luxon_server src/main.cpp)
+add_executable(luxon_server src/main.cpp
+    include/luxon/server/ipc_codes.hpp)
 target_link_libraries(luxon_server luxon_server_lib boost_pfr)
 
 if (LUXON_SERVER_BUILD_FFI)

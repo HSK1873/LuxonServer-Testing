@@ -111,6 +111,19 @@ struct Game : std::enable_shared_from_this<Game> {
     ServerManager& get_server_manager() const { return lobby->app->server_manager; }
 
     ///
+    /// \brief Adds appid, appver, lobbyid, lobbytype, gameid to parameter list
+    /// \param Parameter list to add info to
+    ///
+    void add_game_info(ser::ParameterList& params);
+
+    ///
+    /// \brief Checks if parameters match parameters added by add_game_info from this game
+    /// \param Parameter list to check against
+    /// \return True if parameter list contains info for this game
+    ///
+    bool matches(const ser::ParameterList& params) const;
+
+    ///
     /// \brief Creates a GamePeer that can later be added to the game
     /// \param peer The peer that's going to be behind the GamePeer
     /// \return Complete GamePeer

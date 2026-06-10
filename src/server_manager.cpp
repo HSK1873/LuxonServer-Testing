@@ -62,8 +62,9 @@
 #include "handler_nameserver.hpp"
 #include "handler_masterserver.hpp"
 #include "handler_gameserver.hpp"
-#include "yaml.hpp"
+#include "ipc_codes.hpp"
 #include "pfr_codec.hpp"
+#include "yaml.hpp"
 
 #include <iostream>
 #include <string_view>
@@ -77,6 +78,7 @@
 #ifdef LUXON_SERVER_MULTITHREADED
 #include <thread>
 #endif
+#include <luxon/common_codes.hpp>
 #include <luxon/ser_gp_binary_v18.hpp>
 #include <luxon/ser_encryption.hpp>
 #include <luxon/visualizer.hpp>
@@ -537,6 +539,10 @@ void ServerManager::setup_http_server() {
     http_server_->bind(http_config_->address, http_config_->port);
 }
 #endif
+
+void ServerManager::process_ipc_message(const ser::Message& msg) {
+    // Populate/update/delete games in external_games_, see game.cpp
+}
 
 void ServerManager::setup() {
     ZoneScoped;

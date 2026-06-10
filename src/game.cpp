@@ -4,6 +4,7 @@
 #include "game.hpp"
 #include "global.hpp"
 #include "server_manager.hpp"
+#include "ipc_codes.hpp"
 
 #include <luxon/ser_interface.hpp>
 #include <luxon/common_codes.hpp>
@@ -55,11 +56,48 @@ std::expected<ser::ByteArray, ser::Error> Event::get_cached_data(ser::IProtocol&
     return *expected_payload;
 }
 
-Game::~Game(){// Call into plugins
+Game::~Game() {
+    // Call into plugins
     GAME_PLUGINS_INVOKE({
         OnCloseGameCallInfo info{.failed_on_create = last_actor_id == 0};
         execute_plugin_chain(&PluginBase::OnCloseGame, info);
     });
+
+    auto& server_manager = get_server_manager();
+    if (server_manager.ipc.is_open()) {
+        ser::EventMessage ipc_event;
+        ipc_event.event_code = IPCEventCodes::GameDelete;
+        add_game_info(ipc_event.parameters);
+
+        server_manager.ipc.send_message(ipc_event);
+    }
+}
+
+void Game::add_game_info(ser::ParameterList& params) {
+    params[DictKeyCodes::GameAndActor::GameId] = id;
+    params[DictKeyCodes::AuthAndLobby::LobbyName] = lobby->name;
+    params[DictKeyCodes::AuthAndLobby::LobbyType] = lobby->type;
+    params[DictKeyCodes::LoadBalancing::ApplicationId] = std::string(lobby->app->id);
+    params[DictKeyCodes::LoadBalancing::AppVersion] = std::string(lobby->app->version);
+}
+
+bool Game::matches(const ser::ParameterList& params) const {
+    if (params[DictKeyCodes::GameAndActor::GameId] != id)
+        return false;
+
+    if (params[DictKeyCodes::AuthAndLobby::LobbyName] != lobby->name)
+        return false;
+
+    if (params[DictKeyCodes::AuthAndLobby::LobbyType] != lobby->type)
+        return false;
+
+    if (params[DictKeyCodes::LoadBalancing::ApplicationId].get_or<std::string>() != lobby->app->id)
+        return false;
+
+    if (params[DictKeyCodes::LoadBalancing::AppVersion].get_or<std::string>() != std::string(lobby->app->version))
+        return false;
+
+    return true;
 }
 
 GamePeer Game::create_peer(std::shared_ptr<Peer> peer) {
@@ -330,6 +368,20 @@ void Game::trigger_lobby_update() {
     auto shared_this = shared_from_this();
     for (auto& handler : lobby->game_list_update_handlers)
         handler.game_change(shared_this);
+
+    // Send IPC event
+    auto& server_manager = get_server_manager();
+    if (server_manager.ipc.is_open()) {
+        ser::EventMessage ipc_event;
+        ipc_event.event_code = IPCEventCodes::GameUpdate;
+
+        // Pass GameId and Lobby Properties
+        add_game_info(ipc_event.parameters);
+        ipc_event.parameters[DictKeyCodes::Properties::GameProperties] = std::make_shared<ser::Hashtable>(get_lobby_game_props());
+
+        // Send final message
+        server_manager.ipc.send_message(ipc_event);
+    }
 }
 
 #define PROP_MAP                                                                                                                                               \

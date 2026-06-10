@@ -192,6 +192,7 @@ private:
     std::unordered_map<uint16_t, GameIPC> subprocesses_;
     decltype(servers_)::iterator next_server_it_;
     std::list<HandlerPtr<HandlerBase>> connections_;
+    std::vector<std::shared_ptr<Game>> external_games_;
     std::priority_queue<ScheduledTask, std::vector<ScheduledTask>, std::greater<ScheduledTask>> scheduled_tasks_;
     std::queue<std::move_only_function<void()>> main_loop_calls_;
 #ifdef LUXON_SERVER_MULTITHREADED
@@ -228,6 +229,8 @@ private:
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
     void setup_http_server();
 #endif
+
+    void process_ipc_message(const luxon::ser::Message& msg);
 
     void run_scheduled_tasks();
     void stun_keepalive(enet::EnetServer& server, uint16_t port);
