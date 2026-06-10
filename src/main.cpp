@@ -7,7 +7,7 @@
 #endif
 #include "platform.hpp"
 
-#include <print>
+#include <iostream>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -41,9 +41,8 @@ int main(int argc, char *argv[]) {
             server::ServerManager child_manager((server::IPC(child_fd)));
             child_manager.run();
         } catch (const std::exception& e) {
-            std::println("std::terminate about to be called in subprocess: {}", e.what());
-            std::println("Child is about to die!");
-            fflush(stdout);
+            std::cout << "std::terminate about to be called in subprocess: " << e.what() << std::endl;
+            std::cout << "Child is about to die!" << std::endl;
             throw;
         }
         return EXIT_SUCCESS;
@@ -60,7 +59,7 @@ int main(int argc, char *argv[]) {
         if (os_handle != INVALID_HANDLE_VALUE) {
             SetHandleInformation(os_handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
         } else {
-            std::println(stderr, "Failed to get OS handle for FD {} to create subprocess", fd);
+            std::cerr << "Failed to get OS handle for FD " << fd << " to create subprocess" << std::endl;
             return;
         }
 
@@ -86,7 +85,7 @@ int main(int argc, char *argv[]) {
                             &si,        // Pointer to STARTUPINFO structure
                             &pi         // Pointer to PROCESS_INFORMATION structure
                             )) {
-            std::println(stderr, "CreateProcess to create subprocess failed! Error: {}", GetLastError());
+            std::cerr << "CreateProcess to create subprocess failed! Error: " << GetLastError() << std::endl;
             return;
         }
 
@@ -98,7 +97,7 @@ int main(int argc, char *argv[]) {
         pid_t pid = fork();
 
         if (pid < 0) {
-            std::println(stderr, "Failed to fork subprocess! Errno: {}", errno);
+            std::cerr << "Failed to fork subprocess! Errno: " << errno << std::endl;
             return;
         }
 
@@ -109,7 +108,7 @@ int main(int argc, char *argv[]) {
             execl(exe_path.c_str(), exe_path.c_str(), "--child-fd", fd_str.c_str(), nullptr);
 
             // If execv returns, the replacement failed
-            std::println(stderr, "Subprocess failed to execv! Errno: {}", errno);
+            std::cerr << "Subprocess failed to execv! Errno: " << errno << std::endl;
             std::exit(EXIT_FAILURE);
         }
 #endif
@@ -120,8 +119,7 @@ int main(int argc, char *argv[]) {
     try {
         server::ServerManager("config.yml").run();
     } catch (const std::exception& e) {
-        std::println("std::terminate about to be called: {}", e.what());
-        fflush(stdout);
+        std::cout << "std::terminate about to be called: " << e.what() << std::endl;
         throw;
     }
 
