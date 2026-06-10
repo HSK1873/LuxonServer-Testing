@@ -63,10 +63,12 @@ Game::~Game() {
         execute_plugin_chain(&PluginBase::OnCloseGame, info);
     });
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
     ser::EventMessage ipc_event;
     ipc_event.event_code = IPCEventCodes::GameDelete;
     add_game_info(ipc_event.parameters);
     get_server_manager().ipc_broadcast(ipc_event);
+#endif
 }
 
 void Game::add_game_info(ser::ParameterList& params) {
@@ -358,16 +360,19 @@ std::pair<int16_t, std::string_view> Game::validate_join(const std::string& user
 void Game::trigger_lobby_update() {
     ZoneScoped;
 
+    // Call handlers
     auto shared_this = shared_from_this();
     for (auto& handler : lobby->game_list_update_handlers)
         handler.game_change(shared_this);
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
     // Send IPC event
     ser::EventMessage ipc_event;
     ipc_event.event_code = IPCEventCodes::GameUpdate;
     add_game_info(ipc_event.parameters);
     ipc_event.parameters[DictKeyCodes::Properties::GameProperties] = std::make_shared<ser::Hashtable>(get_lobby_game_props());
     get_server_manager().ipc_broadcast(ipc_event);
+#endif
 }
 
 #define PROP_MAP                                                                                                                                               \

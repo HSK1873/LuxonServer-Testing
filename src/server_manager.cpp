@@ -356,6 +356,7 @@ template <typename T> T *GetRawPointer(const std::shared_ptr<T>& ptr) { return p
 template <typename T> T *GetRawPointer(const std::unique_ptr<T>& ptr) { return ptr.get(); }
 } // namespace
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
 ServerManagerConfig ServerManager::receive_config_from_ipc(IPC& ipc) {
     std::optional<luxon::ser::Message> msg;
 
@@ -373,6 +374,7 @@ ServerManagerConfig ServerManager::receive_config_from_ipc(IPC& ipc) {
 
     throw std::runtime_error("Unexpected IPC message type during subprocess initialization");
 }
+#endif
 
 ServerManagerConfig ServerManager::load_config_from_file(const std::string& config_file) { return parse_config(LoadFile(config_file)); }
 
@@ -433,14 +435,31 @@ ServerManagerConfig ServerManager::parse_config(const std::string& config_conten
 
 ServerManager::ServerManager(const std::string& config_file) : ServerManager(load_config_from_file(config_file)) {}
 
-ServerManager::ServerManager(ServerManagerConfig config, IPC&& ipc) : endpoints(std::move(config.endpoints)), parent_ipc_(std::move(ipc)) {
-    log_ = create_logger(this->parent_ipc_.is_open() ? std::format("Subprocess {} ServerManager", this->parent_ipc_.get_fd()) : "ServerManager");
+ServerManager::ServerManager(ServerManagerConfig config
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+                             ,
+                             IPC&& ipc
+#endif
+                             )
+    : endpoints(std::move(config.endpoints))
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+      ,
+      parent_ipc_(std::move(ipc))
+#endif
+{
+    log_ = create_logger(
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+        this->parent_ipc_.is_open() ? std::format("Subprocess {} ServerManager", this->parent_ipc_.get_fd()) :
+#endif
+                                    "ServerManager");
 #ifndef NDEBUG
     log_->set_level(log_level::trace);
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
     if (ipc.is_open())
         is_subprocess_ = true;
+#endif
 
     configs_ = std::move(config.servers);
     enable_ipv6_ = config.enable_ipv6;
@@ -465,7 +484,9 @@ ServerManager::ServerManager(ServerManagerConfig config, IPC&& ipc) : endpoints(
     setup();
 }
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
 ServerManager::ServerManager(IPC&& ipc) : ServerManager(receive_config_from_ipc(ipc), std::move(ipc)) {}
+#endif
 
 const ServerEndpoint& ServerManager::get_endpoint_of(ServerType server_type, ServerProtocol server_proto) {
     ZoneScoped;
@@ -617,6 +638,7 @@ bool ServerManager::run_once() {
         if (http_server_)
             http_server_->service_now();
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
         // Receive and process an IPC message per child and parent
         for (auto& [port, ipc] : subprocesses_)
             if (ipc.is_open())
@@ -632,6 +654,7 @@ bool ServerManager::run_once() {
             stop();
             log_->info("Parent has closed the IPC connection. Stopping...");
         }
+#endif
 
         // End busy performance timer
         const auto end_time = std::chrono::steady_clock::now();
@@ -655,6 +678,7 @@ std::expected<std::shared_ptr<Game>, std::string> ServerManager::get_game(Lobby&
     return *game;
 }
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
 void ServerManager::ipc_broadcast(const ser::Message& message, bool parent, bool children) {
     if (parent)
         if (&parent_ipc_ != ipc_broadcast_skip_)
@@ -666,6 +690,7 @@ void ServerManager::ipc_broadcast(const ser::Message& message, bool parent, bool
                 if (ipc.is_open())
                     ipc.send_message(message);
 }
+#endif
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
 void ServerManager::setup_http_server() {
@@ -686,6 +711,7 @@ void ServerManager::setup_http_server() {
 }
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
 void ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& msg) {
     ipc_broadcast_skip_ = &sender;
 
@@ -837,6 +863,7 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
         }
     }
 }
+#endif
 
 void ServerManager::setup() {
     ZoneScoped;
@@ -853,8 +880,12 @@ void ServerManager::setup() {
     // Create servers
     for (const auto& config : configs_) {
         if (config.subprocess) {
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
             setup_subprocess(config);
             continue; // Skip the native bind routine in the parent for this iteration
+#else
+            log_->warn("Subprocess enabled in config, but not enabled at compile time");
+#endif
         }
 
         // Create enet server and configure it
@@ -998,6 +1029,7 @@ void ServerManager::setup() {
     next_server_it_ = servers_.end();
 }
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
 void ServerManager::setup_subprocess(const ServerConfig& config) {
     log_->info("Setting up {} on port {} as a subprocess", ServerTypeToString(config.type), config.port);
 
@@ -1052,4 +1084,5 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
     else
         log_->error("Failed to serialize config for subprocess on port {}: {}", config.port, val_res.error().message);
 }
+#endif
 } // namespace server

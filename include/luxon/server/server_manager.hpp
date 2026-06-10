@@ -9,7 +9,9 @@
 #include "string_hash.hpp"
 #include "logger.hpp"
 #include "hookpoints.hpp"
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
 #include "ipc.hpp"
+#endif
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
 #include "settings_manager.hpp"
 #endif
@@ -189,15 +191,17 @@ private:
     std::shared_ptr<logger> log_;
     std::vector<ServerConfig> configs_;
     std::unordered_map<uint16_t, enet::EnetServer> servers_;
-    IPC parent_ipc_;
-    IPC *ipc_broadcast_skip_{};
-    bool is_subprocess_{};
-    std::unordered_map<uint16_t, IPC> subprocesses_;
     decltype(servers_)::iterator next_server_it_;
     std::list<HandlerPtr<HandlerBase>> connections_;
     std::vector<std::shared_ptr<Game>> external_games_;
     std::priority_queue<ScheduledTask, std::vector<ScheduledTask>, std::greater<ScheduledTask>> scheduled_tasks_;
     std::queue<std::move_only_function<void()>> main_loop_calls_;
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+    IPC parent_ipc_;
+    IPC *ipc_broadcast_skip_{};
+    bool is_subprocess_{};
+    std::unordered_map<uint16_t, IPC> subprocesses_;
+#endif
 #ifdef LUXON_SERVER_MULTITHREADED
     std::mutex main_loop_calls_mutex_;
 #endif
@@ -228,14 +232,18 @@ private:
     uint32_t tick_time_budget_ = 2000;
 
     void setup();
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
     void setup_subprocess(const ServerConfig& config);
+#endif
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
     void setup_http_server();
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
     void process_child_ipc_message(IPC& sender, const luxon::ser::Message& msg);
     void process_parent_ipc_message(IPC& sender, const luxon::ser::Message& msg);
     void process_ipc_event(const ser::EventMessage& event_msg);
+#endif
 
     void run_scheduled_tasks();
     void stun_keepalive(enet::EnetServer& server, uint16_t port);
@@ -253,8 +261,14 @@ public:
     ///
     /// \brief Construct manager directly from C++ configuration
     ///
-    explicit ServerManager(ServerManagerConfig config, IPC&& ipc = {});
+    explicit ServerManager(ServerManagerConfig config
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
+                           ,
+                           IPC&& ipc = {}
+#endif
+    );
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
     ///
     /// \brief Construct manager from IPC child fd
     /// \note Configuration will be received from parent via IPC
@@ -265,6 +279,7 @@ public:
     /// \brief Receive ServerManagerConfig from parent
     ///
     static ServerManagerConfig receive_config_from_ipc(IPC& ipc);
+#endif
 
     ///
     /// \brief Load ServerManagerConfig from YAML file
@@ -325,6 +340,7 @@ public:
     ///
     std::expected<std::shared_ptr<Game>, std::string> get_game(Lobby& lobby, const GameInfo& info);
 
+#ifdef LUXON_SERVER_ENABLE_MULTIPROCESSINGING
     ///
     /// \brief Broadcasts a serialized message via IPC to parent and/or child processes
     /// \param message The serialized message payload to send
@@ -340,6 +356,8 @@ public:
     /// \param skip Optional IPC connection pointer to exclude from the broadcast (e.g., the original sender)
     ///
     void ipc_broadcast(const ser::Message& message) { return ipc_broadcast(message, true, true); }
+#endif
+
     ///
     /// \brief Gets the external address of a random server of given type
     /// \param server_type Type of server to get
