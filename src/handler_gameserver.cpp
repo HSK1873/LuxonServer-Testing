@@ -58,7 +58,7 @@ void GameServerHandler::HandleDisconnect() {
                 // Call into plugins
                 GAME_PLUGINS_INVOKE({
                     OnLeaveGameCallInfo info{.leaver = game_peer_};
-                    ser::OperationRequestMessage req{.operation_code = 0};
+                    ser::OperationRequestMessage req{.operation_code = OpCodes::Lite::Leave};
                     game->execute_plugin_chain(&PluginBase::OnLeave, req, info);
                 });
             }
@@ -80,7 +80,7 @@ void GameServerHandler::HandleDisconnect() {
                 event.top_params[DictKeyCodes::GameAndActor::ActorNo] = actor_id;
                 event.top_params[DictKeyCodes::GameAndActor::ActorList] = actor_ids;
                 if (was_master)
-                    event.top_params[GameProps::MasterClientId] = game->master_actor;
+                    event.top_params[DictKeyCodes::MetadataAndMisc::MasterClientId] = game->master_actor;
                 current_game_->broadcast_event(event);
             }
         }
