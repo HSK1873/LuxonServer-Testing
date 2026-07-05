@@ -132,6 +132,12 @@ public:
     FfiGamePlugin(server::Game *game, std::string_view plugin_name, uint32_t plugin_id)
         : server::game_plugins::PluginBase(game, plugin_name), plugin_id_(plugin_id) {}
 
+    static inline void update_req_from_updated_msg(luxon::ser::OperationRequestMessage& req, const luxon::ser::Message& msg) {
+        if (msg.is_owning())
+            if (auto *new_req = msg.get_if<luxon::ser::OperationRequestMessage>())
+                req = *new_req;
+    }
+
     void OnAttach() override {
 #if defined(FFI_WASM) || defined(__wasm__)
         gamePluginOnAttach(plugin_id_, wrap<GameHandle>(game_));
@@ -152,11 +158,7 @@ public:
             res = g_imports.gamePluginOnCreateGame(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<PeerHandle>(info.creator.get()),
                                                    info.is_join, info.create_if_not_exist);
 #endif
-
-        if (msg_ref.is_owning())
-            if (auto *new_req = msg_ref.get_if<luxon::ser::OperationRequestMessage>())
-                req = *new_req;
-
+        update_req_from_updated_msg(req, msg_ref);
         return static_cast<server::game_plugins::Result>(res);
     }
 
@@ -169,11 +171,7 @@ public:
         if (g_imports.gamePluginBeforeJoin)
             res = g_imports.gamePluginBeforeJoin(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<PeerHandle>(info.joiner.get()));
 #endif
-
-        if (msg_ref.is_owning())
-            if (auto *new_req = msg_ref.get_if<luxon::ser::OperationRequestMessage>())
-                req = *new_req;
-
+        update_req_from_updated_msg(req, msg_ref);
         return static_cast<server::game_plugins::Result>(res);
     }
 
@@ -186,11 +184,7 @@ public:
         if (g_imports.gamePluginOnJoinGame)
             res = g_imports.gamePluginOnJoinGame(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.joiner));
 #endif
-
-        if (msg_ref.is_owning())
-            if (auto *new_req = msg_ref.get_if<luxon::ser::OperationRequestMessage>())
-                req = *new_req;
-
+        update_req_from_updated_msg(req, msg_ref);
         return static_cast<server::game_plugins::Result>(res);
     }
 
@@ -203,11 +197,7 @@ public:
         if (g_imports.gamePluginOnLeave)
             res = g_imports.gamePluginOnLeave(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.leaver));
 #endif
-
-        if (msg_ref.is_owning())
-            if (auto *new_req = msg_ref.get_if<luxon::ser::OperationRequestMessage>())
-                req = *new_req;
-
+        update_req_from_updated_msg(req, msg_ref);
         return static_cast<server::game_plugins::Result>(res);
     }
 
@@ -222,11 +212,7 @@ public:
             res = g_imports.gamePluginOnRaiseEvent(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.raiser),
                                                    wrap<EventHandle>(&info.event), info.cache_op);
 #endif
-
-        if (msg_ref.is_owning())
-            if (auto *new_req = msg_ref.get_if<luxon::ser::OperationRequestMessage>())
-                req = *new_req;
-
+        update_req_from_updated_msg(req, msg_ref);
         return static_cast<server::game_plugins::Result>(res);
     }
 
@@ -245,11 +231,7 @@ public:
                                                           wrap<GamePeerHandle>(info.setter), info.broadcast, info.target_actor_id,
                                                           wrap<SerValueHandle>(&up_val), wrap<SerValueHandle>(&exp_val));
 #endif
-
-        if (msg_ref.is_owning())
-            if (auto *new_req = msg_ref.get_if<luxon::ser::OperationRequestMessage>())
-                req = *new_req;
-
+        update_req_from_updated_msg(req, msg_ref);
         return static_cast<server::game_plugins::Result>(res);
     }
 
@@ -266,11 +248,7 @@ public:
             res = g_imports.gamePluginOnSetProperties(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.setter),
                                                       info.broadcast, info.target_actor_id, wrap<SerValueHandle>(&up_val), wrap<SerValueHandle>(&exp_val));
 #endif
-
-        if (msg_ref.is_owning())
-            if (auto *new_req = msg_ref.get_if<luxon::ser::OperationRequestMessage>())
-                req = *new_req;
-
+        update_req_from_updated_msg(req, msg_ref);
         return static_cast<server::game_plugins::Result>(res);
     }
 
