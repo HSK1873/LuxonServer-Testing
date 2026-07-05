@@ -348,7 +348,7 @@ ServerManagerConfig ServerManager::receive_config_from_ipc(IPC& ipc) {
         ;
 
     // Expect a GenericValueMessage containing the PFR-encoded ServerManagerConfig
-    if (auto *gvm = std::get_if<luxon::ser::GenericValueMessage>(&msg.value())) {
+    if (auto *gvm = msg.value().get_if<luxon::ser::GenericValueMessage>()) {
         auto decoded = pfr_codec::from_value<ServerManagerConfig>(gvm->value);
         if (!decoded)
             throw std::runtime_error("Failed to decode ServerManagerConfig from IPC: " + decoded.error().message);
@@ -731,7 +731,7 @@ void ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& m
     ipc_broadcast_skip_ = &sender;
 
     // Only accept event messages
-    auto *event_msg = std::get_if<ser::EventMessage>(&msg);
+    auto *event_msg = msg.get_if<ser::EventMessage>();
     if (!event_msg)
         return;
 
@@ -742,7 +742,7 @@ void ServerManager::process_parent_ipc_message(IPC& sender, const ser::Message& 
     ipc_broadcast_skip_ = &sender;
 
     // Only accept event messages
-    auto *event_msg = std::get_if<ser::EventMessage>(&msg);
+    auto *event_msg = msg.get_if<ser::EventMessage>();
     if (!event_msg)
         return;
 

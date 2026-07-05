@@ -110,13 +110,13 @@ void HandlerBase::HandleENetCommand(enet::EnetCommand&& cmd) {
 
     LUXON_SERVER_HOOKPOINT(HandlerBase_HandleENetCommand_OnMessage, message, cmd.header);
 
-    if (auto *req = std::get_if<ser::InitMessage>(&message))
+    if (auto *req = message.get_if<ser::InitMessage>())
         return HandleInitRequest(std::move(*req), cmd.header);
 
-    if (auto *req = std::get_if<ser::OperationRequestMessage>(&message))
+    if (auto *req = message.get_if<ser::OperationRequestMessage>())
         return HandleOperationRequest(std::move(*req), message.encrypted, cmd.header);
 
-    if (auto *req = std::get_if<ser::InternalOperationRequestMessage>(&message))
+    if (auto *req = message.get_if<ser::InternalOperationRequestMessage>())
         return HandleInternalOperationRequest(std::move(*req), message.encrypted, cmd.header);
 
     peer_->log->warn("Invalid message type {} received", message.index());
