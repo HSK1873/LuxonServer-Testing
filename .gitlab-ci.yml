@@ -88,6 +88,7 @@ build:bootlin:armhf:
       -DCMAKE_CXX_COMPILER=arm-buildroot-linux-uclibcgnueabihf-g++
       -DCMAKE_EXE_LINKER_FLAGS="-static"
       -DLUXON_SERVER_USE_SANMAKE=OFF
+      -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
     - cmake --build build
     - mv build/luxon_server build/luxon_server.uclibc-static.rel+debinfo.linux-armhf
 
@@ -108,7 +109,7 @@ build:nintendo_3ds:
   image: devkitpro/devkitarm:latest
   script:
     - source /etc/profile.d/devkit-env.sh
-    - cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE=${DEVKITPRO}/cmake/3DS.cmake
+    - cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE=${DEVKITPRO}/cmake/3DS.cmake -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
     - cmake --build build
     - 3dsxtool build/luxon_server.elf build/luxon_server.3dsx
     - mv build/luxon_server.elf build/luxon_server.devkitarm.rel+debinfo.elf
@@ -229,6 +230,7 @@ build:mingw:vista_x86:
       -DCMAKE_EXE_LINKER_FLAGS="-static -Wl,--subsystem,console:6.00"
       -DLUXON_USE_EMBED_RESOURCE=ON
       -DLUXON_SERVER_USE_SANMAKE=OFF
+      -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
     - cmake --build build
     - mv build/luxon_server.exe build/luxon_server.mingw-vista.rel+debinfo.exe
 
@@ -245,6 +247,7 @@ build:wasip1:wasm32:
     - >
       cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
       -DCMAKE_TOOLCHAIN_FILE=$WASI_SDK_PREFIX/share/cmake/wasi-sdk-p1.cmake
+      -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
     - cmake --build build
     - mv build/luxon_server build/luxon_server.wasi-sdk.rel+debinfo.wasm
 
