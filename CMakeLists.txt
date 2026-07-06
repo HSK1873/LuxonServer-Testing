@@ -26,7 +26,6 @@ include(CMakeDependentOption)
 
 # Core server options
 option(LUXON_SERVER_ENABLE_WEBSERVER "Enable the built-in webserver" ON)
-option(LUXON_SERVER_ENABLE_MULTIPROCESSING "Enable IPC system and game server subprocesses" OFF)
 option(LUXON_USE_EMBED_RESOURCE "Use EmbedResource instead of incbin.h" OFF)
 
 # Profiling options
@@ -72,12 +71,13 @@ if (MSVC OR WASI)
     set(LUXON_USE_EMBED_RESOURCE ON)
 endif()
 
-# Linux/Windows/FreeBSD get to use sanmake, mbedtls, spdlog and setting storage database support
+# Linux/Windows/FreeBSD/OpenBSD/Darwin get to use sanmake, mbedtls, spdlog, multiprocessing and setting storage database support
 if (CMAKE_SYSTEM_NAME MATCHES "^(Linux|Windows|FreeBSD|OpenBSD|Darwin)$")
     add_subdirectory(Luxon)
 
     option(LUXON_SERVER_USE_SPDLOG "Use spdlog for Luxon server" ON)
     option(LUXON_SERVER_USE_SANMAKE "Use basic sanitizers for Luxon server" ON)
+    option(LUXON_SERVER_ENABLE_MULTIPROCESSING "Enable IPC system and game server subprocesses" ON)
     option(LUXON_SERVER_ENABLE_SETTINGS_DATABASE "Build Luxon Server with settings storage database support enabled" ON)
 else()
     # Compatible configuration
@@ -87,6 +87,7 @@ else()
 
     set(LUXON_SERVER_USE_SPDLOG OFF)
     set(LUXON_SERVER_USE_SANMAKE OFF)
+    set(LUXON_SERVER_ENABLE_MULTIPROCESSING OFF)
     set(LUXON_SERVER_ENABLE_SETTINGS_DATABASE OFF)
 endif()
 
