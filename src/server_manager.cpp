@@ -827,10 +827,8 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
                 game->insert_game_props(*props_ptr);
             }
 
-            if (is_new) {
-                log_->info("Resetting game ownership!");
+            if (is_new)
                 reset_persistent_peer_game_ownership(*this, *game);
-            }
 
             return;
         }
