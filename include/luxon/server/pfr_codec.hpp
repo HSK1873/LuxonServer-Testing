@@ -32,6 +32,7 @@ using namespace luxon::ser;
 
 struct options {
     std::size_t max_depth = 64;
+    bool zero_copy = false;
 };
 
 struct error {
@@ -481,7 +482,7 @@ template <typename T> result<Value> encode(const T& x, const options& opt, std::
     } else if constexpr (std::is_enum_v<U>) {
         return encode(static_cast<std::underlying_type_t<U>>(x), opt, path, depth + 1);
     } else if constexpr (std::same_as<U, std::string>) {
-        return Value(x);
+        return opt.zero_copy ? Value(const_cast<std::string *>(&x)) : Value(x);
     } else if constexpr (std::same_as<U, bool>) {
         return Value(x);
     } else if constexpr (std::integral<U>) {
@@ -499,7 +500,10 @@ template <typename T> result<Value> encode(const T& x, const options& opt, std::
     } else if constexpr (std::same_as<U, Hashtable>) {
         return Value(std::make_shared<Hashtable>(x));
     } else if constexpr (is_std_vector_v<U>) {
-        return encode_range<typename U::value_type>(x.begin(), x.end(), x.size(), opt, path, depth);
+        if constexpr (is_exact_native_v<U>)
+            return opt.zero_copy ? Value(const_cast<U *>(&x)) : Value(x);
+        else
+            return encode_range<typename U::value_type>(x.begin(), x.end(), x.size(), opt, path, depth);
     } else if constexpr (is_std_array_v<U>) {
         return encode_range<typename U::value_type>(x.begin(), x.end(), x.size(), opt, path, depth);
     } else if constexpr (is_std_pair_v<U>) {
@@ -563,7 +567,10 @@ template <typename T> result<Value> encode(const T& x, const options& opt, std::
         }
         return Value(std::move(out));
     } else if constexpr (is_exact_native_v<U>) {
-        return Value(x);
+        if constexpr (std::is_scalar_v<U> || std::same_as<U, std::monostate>)
+            return Value(x);
+        else
+            return opt.zero_copy ? Value(const_cast<U *>(&x)) : Value(x);
     } else if constexpr (pfr_reflectable<U>) {
         return encode_pfr_impl(x, opt, path, depth, std::make_index_sequence<boost::pfr::tuple_size_v<U>>{});
     } else {

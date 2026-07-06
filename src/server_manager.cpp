@@ -1113,7 +1113,7 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
 #endif
 
     // Encode the configuration object
-    auto val_res = pfr_codec::to_value(child_config);
+    auto val_res = pfr_codec::to_value(child_config, {.zero_copy = true});
     if (val_res)
         ipc.send_message(luxon::ser::GenericValueMessage{std::move(*val_res)});
     else

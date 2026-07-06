@@ -78,7 +78,7 @@ void GameServerHandler::HandleDisconnect() {
 
                 Event event{.code = EventCodes::Leave, .sender_actor_id = actor_id, .receivers = ReceiverGroup::All};
                 event.top_params[DictKeyCodes::GameAndActor::ActorNo] = actor_id;
-                event.top_params[DictKeyCodes::GameAndActor::ActorList] = actor_ids;
+                event.top_params[DictKeyCodes::GameAndActor::ActorList] = &actor_ids;
                 if (was_master)
                     event.top_params[DictKeyCodes::MetadataAndMisc::MasterClientId] = game->master_actor;
                 current_game_->broadcast_event(event);
@@ -484,21 +484,21 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
 
             resp.parameters[DictKeyCodes::GameSettings::GameFlags] = static_cast<int32_t>(game->flags);
             if (!(game->flags & GameFlags::SuppressRoomEvents))
-                resp.parameters[DictKeyCodes::GameAndActor::ActorList] = actor_ids;
+                resp.parameters[DictKeyCodes::GameAndActor::ActorList] = &actor_ids;
             resp.parameters[DictKeyCodes::Properties::GameProperties] = game->get_game_props();
             resp.parameters[DictKeyCodes::GameAndActor::ActorNo] = game_peer_->actor_id;
             if (broadcast_actor_props)
-                resp.parameters[DictKeyCodes::Properties::ActorProperties] = std::move(all_actor_props);
+                resp.parameters[DictKeyCodes::Properties::ActorProperties] = &all_actor_props;
 
             send(proto_->Serialize(resp));
 
             // Broadcast Join Event
             if (!(game->flags & GameFlags::SuppressRoomEvents)) {
                 Event event{.code = EventCodes::Join, .sender_actor_id = game_peer_->actor_id, .receivers = ReceiverGroup::All};
-                event.top_params[DictKeyCodes::GameAndActor::ActorList] = actor_ids;
+                event.top_params[DictKeyCodes::GameAndActor::ActorList] = &actor_ids;
                 event.top_params[DictKeyCodes::GameAndActor::ActorNo] = game_peer_->actor_id;
                 if (broadcast_actor_props && !(game->flags & GameFlags::SuppressPlayerInfo))
-                    event.top_params[DictKeyCodes::Properties::ActorProperties] = game_peer_->actor_props;
+                    event.top_params[DictKeyCodes::Properties::ActorProperties] = &game_peer_->actor_props;
 
                 game->broadcast_event(event);
             }
