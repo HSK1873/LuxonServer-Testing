@@ -153,34 +153,32 @@ json photon_hash_to_json(const Hashtable& hash) {
 json photon_val_to_json(const Value& val) {
     ZoneScoped;
 
-    return std::visit(
-        [](auto&& arg) -> json {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, std::monostate>)
-                return nullptr;
-            else if constexpr (std::is_same_v<T, bool>)
-                return arg;
-            else if constexpr (std::is_arithmetic_v<T>)
-                return arg;
-            else if constexpr (std::is_same_v<T, std::string>)
-                return arg;
-            else if constexpr (std::is_same_v<T, std::vector<uint8_t>>)
-                return bytes_to_hex(arg);
-            else if constexpr (std::is_same_v<T, std::vector<std::string>>)
-                return arg;
-            else if constexpr (std::is_same_v<T, Dictionary>)
-                return photon_dict_to_json(arg);
-            else if constexpr (std::is_same_v<T, std::shared_ptr<Hashtable>>)
-                return arg ? photon_hash_to_json(*arg) : json(nullptr);
-            else if constexpr (std::is_same_v<T, ObjectArray>) {
-                json arr = json::array();
-                for (const auto& v : arg)
-                    arr.push_back(photon_val_to_json(v));
-                return arr;
-            } else
-                return "<complex>";
-        },
-        val.value);
+    return val.value.visit([](auto&& arg) -> json {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, std::monostate>)
+            return nullptr;
+        else if constexpr (std::is_same_v<T, bool>)
+            return arg;
+        else if constexpr (std::is_arithmetic_v<T>)
+            return arg;
+        else if constexpr (std::is_same_v<T, std::string>)
+            return arg;
+        else if constexpr (std::is_same_v<T, std::vector<uint8_t>>)
+            return bytes_to_hex(arg);
+        else if constexpr (std::is_same_v<T, std::vector<std::string>>)
+            return arg;
+        else if constexpr (std::is_same_v<T, Dictionary>)
+            return photon_dict_to_json(arg);
+        else if constexpr (std::is_same_v<T, std::shared_ptr<Hashtable>>)
+            return arg ? photon_hash_to_json(*arg) : json(nullptr);
+        else if constexpr (std::is_same_v<T, ObjectArray>) {
+            json arr = json::array();
+            for (const auto& v : arg)
+                arr.push_back(photon_val_to_json(v));
+            return arr;
+        } else
+            return "<complex>";
+    });
 }
 } // namespace json_conv
 } // namespace

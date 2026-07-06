@@ -26,6 +26,7 @@
 #include <memory>
 #include <luxon/common_codes.hpp>
 #include <luxon/ser_types.hpp>
+#include <luxon/ref_variant.hpp>
 #include <magic_enum/magic_enum.hpp>
 #include <tracy/Tracy.hpp>
 
@@ -35,7 +36,7 @@ namespace ser = luxon::ser;
 // Compile-time helpers / concepts
 
 template <typename T, typename Variant> struct IsInVariantImpl : std::false_type {};
-template <typename T, typename... Ts> struct IsInVariantImpl<T, std::variant<Ts...>> : std::bool_constant<(std::is_same_v<T, Ts> || ...)> {};
+template <typename T, typename... Ts> struct IsInVariantImpl<T, ser::ref_variant<Ts...>> : std::bool_constant<(std::is_same_v<T, Ts> || ...)> {};
 
 template <typename T, typename Variant>
 concept IsVariantMember = IsInVariantImpl<T, Variant>::value;
@@ -171,12 +172,10 @@ template <typename T> constexpr std::string_view value_type_name() {
 }
 
 inline std::string_view actual_type_name(const ser::Value& v) {
-    return std::visit(
-        [](const auto& x) -> std::string_view {
-            using T = std::decay_t<decltype(x)>;
-            return value_type_name<T>();
-        },
-        v.value);
+    return v.value.visit([](const auto& x) -> std::string_view {
+        using T = std::decay_t<decltype(x)>;
+        return value_type_name<T>();
+    });
 }
 
 template <class T> inline std::string expected_type_string() {

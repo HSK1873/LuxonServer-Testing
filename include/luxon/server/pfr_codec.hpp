@@ -637,15 +637,13 @@ template <typename T> result<T> decode(const Value& v, const options& opt, std::
                 return *p;
         } else {
             std::optional<U> extracted;
-            std::visit(
-                [&](const auto& arg) {
-                    using A = std::decay_t<decltype(arg)>;
-                    // Statically filter out variant's non-numeric payloads (strings, arrays, etc.)
-                    if constexpr (std::integral<A> || std::floating_point<A>)
-                        if constexpr (!std::same_as<A, bool>)
-                            extracted = static_cast<U>(arg);
-                },
-                v.value);
+            v.value.visit([&](const auto& arg) {
+                using A = std::decay_t<decltype(arg)>;
+                // Statically filter out variant's non-numeric payloads (strings, arrays, etc.)
+                if constexpr (std::integral<A> || std::floating_point<A>)
+                    if constexpr (!std::same_as<A, bool>)
+                        extracted = static_cast<U>(arg);
+            });
 
             if (extracted)
                 return *extracted;
