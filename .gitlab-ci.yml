@@ -86,6 +86,8 @@ build:bootlin:armhf:
       -DCMAKE_SYSTEM_PROCESSOR=armv7
       -DCMAKE_C_COMPILER=arm-buildroot-linux-uclibcgnueabihf-gcc
       -DCMAKE_CXX_COMPILER=arm-buildroot-linux-uclibcgnueabihf-g++
+      -DCMAKE_C_FLAGS="-gno-variable-location-views"
+      -DCMAKE_CXX_FLAGS="-gno-variable-location-views"
       -DCMAKE_EXE_LINKER_FLAGS="-static"
       -DLUXON_SERVER_USE_SANMAKE=OFF
       -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
@@ -247,7 +249,6 @@ build:wasip1:wasm32:
     - >
       cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
       -DCMAKE_TOOLCHAIN_FILE=$WASI_SDK_PREFIX/share/cmake/wasi-sdk-p1.cmake
-      -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
     - cmake --build build
     - mv build/luxon_server build/luxon_server.wasi-sdk.rel+debinfo.wasm
 
