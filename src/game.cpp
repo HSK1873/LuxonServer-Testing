@@ -51,7 +51,7 @@ std::expected<ser::ByteArray, ser::Error> Event::get_cached_data(ser::IProtocol&
     event_data.parameters[DictKeyCodes::GameAndActor::ActorNo] = static_cast<int32_t>(sender_actor_id);
 
     if (!data.is_null())
-        event_data.parameters[DictKeyCodes::RoutingAndEvents::Data] = data; // Take data
+        event_data.parameters[DictKeyCodes::RoutingAndEvents::Data] = data.as_ref();
 
     // Serialize the complete packet
     auto expected_payload = protocol.Serialize(event_data, false);

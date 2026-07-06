@@ -286,7 +286,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             }
 
             // Add To Cache
-            bool can_cache = (cache_op == CacheOperation::AddToRoomCache || cache_op == CacheOperation::AddToRoomCacheGlobal);
+            const bool can_cache = (cache_op == CacheOperation::AddToRoomCache || cache_op == CacheOperation::AddToRoomCacheGlobal);
             if (can_cache && params->get<ActorList>() == nullptr &&
                 params->get<DictKeyCodes::RoutingAndEvents::ReceiverGroup>() != ReceiverGroup::MasterClient &&
                 params->get<DictKeyCodes::RoutingAndEvents::InterestGroup>() == 0) {
