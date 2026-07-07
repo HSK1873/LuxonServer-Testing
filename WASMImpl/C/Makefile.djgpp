@@ -1,6 +1,7 @@
 # --- Toolchain & Flags ---
 CC        := i586-pc-msdosdjgpp-gcc
-CFLAGS    := -O3 -I. -I/opt/djgpp/i586-pc-msdosdjgpp/include/watt32 -DDISABLE_BOUNDS_CHECKS=1
+STRIP     := i586-pc-msdosdjgpp-strip
+CFLAGS    := -Oz -Wno-attributes -I. -I/opt/djgpp/i586-pc-msdosdjgpp/include/watt32 -DDISABLE_BOUNDS_CHECKS=1
 LDFLAGS   := -lm -lwatt
 
 WASM2C    := wasm2c
@@ -23,9 +24,10 @@ include Makefile.common
 
 all: $(TARGET)
 
-# Link final executable
+# Link and strip final executable
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+	$(STRIP) $@
 
 # Compile C files
 %.o: %.c $(GEN_HDR)
