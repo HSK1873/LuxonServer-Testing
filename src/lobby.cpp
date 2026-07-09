@@ -53,6 +53,38 @@ Lobby::Lobby(std::shared_ptr<App> app, std::string name, uint8_t type) : app(std
             const std::unique_ptr<char, decltype(&sqlite3_free)> unique_error_message(error_message, sqlite3_free);
             throw std::runtime_error(std::format("Failed to set database to read-only: {}", error_message));
         }
+
+        // Abort query after 100000 internal operations
+        sqlite3_progress_handler(sql, 100000, [](void *) -> int { return 1; }, nullptr);
+
+        // Limit depth of expression trees
+        sqlite3_limit(sql, SQLITE_LIMIT_EXPR_DEPTH, 20);
+
+        // Prevent huge string allocations
+        sqlite3_limit(sql, SQLITE_LIMIT_LENGTH, 4096);
+
+        // Filter dangerous or potentially slow operations
+        sqlite3_set_authorizer(
+            sql,
+            [](void *, int action, const char *arg1, const char *arg2, const char *, const char *) -> int {
+                // Only allow certain functions
+                if (action == SQLITE_FUNCTION && arg1 != nullptr) {
+                    std::string_view func(arg1);
+
+                    if (func != "LIKE" && func != "GLOB" && func != "lower" && func != "upper" && func != "ifnull" && func != "coalesce" && func != "abs" &&
+                        func != "length" && func != "count" && func != "min" && func != "max")
+                        return SQLITE_DENY;
+                    return SQLITE_OK;
+                }
+
+                // Only allow certain actions
+                if (action == SQLITE_SELECT || action == SQLITE_READ)
+                    return SQLITE_OK;
+
+                // Deny everything else
+                return SQLITE_DENY;
+            },
+            nullptr);
     }
 }
 
@@ -165,7 +197,7 @@ std::vector<std::string> Lobby::query_lobbies(const std::string& sql_queries) {
             continue;
 
         // Select the __id using the user's WHERE condition
-        std::string full_query = std::format("SELECT __id FROM Games WHERE {} LIMIT 100;", filter);
+        const std::string full_query = std::format("SELECT __id FROM Games WHERE ({}) LIMIT 100;", filter);
 
         sqlite3_stmt *stmt = nullptr;
         SQLFinalize stmt_guard{stmt};
