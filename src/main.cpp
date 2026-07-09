@@ -53,7 +53,16 @@ int main(int argc, char *argv[]) {
     }
 
     // Capture the executable path to spawn exact clones later
+#ifdef __linux__
+    std::string exe_path;
+    {
+        char path_buf[PATH_MAX];
+        ssize_t count = readlink("/proc/self/exe", path_buf, sizeof(path_buf));
+        exe_path = (count != -1) ? std::string(path_buf, count) : argv[0];
+    }
+#else
     std::string exe_path = argv[0];
+#endif
 
     // Set up the subprocess spawning mechanism before the manager is initialized
     server::ServerManager::handle_start_subprocess = [exe_path](const std::string& fd) {
