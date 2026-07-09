@@ -3,6 +3,7 @@
 
 #include "game.hpp"
 #include "global.hpp"
+#include "logger.hpp"
 #include "server_manager.hpp"
 #include "peer_persistence.hpp"
 #include "ipc_codes.hpp"
@@ -40,11 +41,19 @@ std::expected<ser::ByteArray, ser::Error> Event::get_cached_data(ser::IProtocol&
     ZoneScoped;
 
     const auto protocol_index = static_cast<size_t>(protocol.GetProtcolImplID());
-    auto& cache = cached_data[protocol_index];
 
     // Return the already serialized network packet for this protocol
-    if (protocol_index < cached_data.size() && !cache.empty())
-        return cache;
+    ser::ByteArray *cache_ptr{};
+    if (protocol_index < cached_data.size()) {
+        auto& cache = cached_data[protocol_index];
+        if (!cache.empty())
+            return cache;
+        cache_ptr = &cache;
+    } else {
+        create_logger("Event::get_cached_data")
+            ->warn("Trying to use protocol index {}, but maximum cache index is {}! THIS IS A BUG IN LUXON SERVER, PLEASE REPORT!", protocol_index,
+                   cached_data.size());
+    }
 
     // Build the base event message
     ser::EventMessage event_data{.event_code = code, .parameters = top_params};
@@ -59,8 +68,8 @@ std::expected<ser::ByteArray, ser::Error> Event::get_cached_data(ser::IProtocol&
         return std::unexpected(expected_payload.error());
 
     // Cache it if it's a known protocol
-    if (protocol_index < cached_data.size())
-        cache = *expected_payload;
+    if (cache_ptr)
+        *cache_ptr = *expected_payload;
 
     return *expected_payload;
 }
