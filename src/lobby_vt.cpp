@@ -113,14 +113,31 @@ static int vtBestIndex(sqlite3_vtab *pVTab, sqlite3_index_info *pIdxInfo) {
             const int col = constraint.iColumn;
 
             char opChar = 0;
-            if (constraint.op == SQLITE_INDEX_CONSTRAINT_EQ)
+            switch (constraint.op) {
+            case SQLITE_INDEX_CONSTRAINT_EQ:
                 opChar = '=';
-            else if (constraint.op == SQLITE_INDEX_CONSTRAINT_LIKE)
+                break;
+            case SQLITE_INDEX_CONSTRAINT_LIKE:
                 opChar = 'L';
-            else if (constraint.op == SQLITE_INDEX_CONSTRAINT_GLOB)
+                break;
+            case SQLITE_INDEX_CONSTRAINT_GLOB:
                 opChar = 'G';
-            else
+                break;
+            case SQLITE_INDEX_CONSTRAINT_GT:
+                opChar = '>';
+                break;
+            case SQLITE_INDEX_CONSTRAINT_LT:
+                opChar = '<';
+                break;
+            case SQLITE_INDEX_CONSTRAINT_GE:
+                opChar = ']';
+                break;
+            case SQLITE_INDEX_CONSTRAINT_LE:
+                opChar = '[';
+                break;
+            default:
                 continue;
+            }
 
             if (col < 0 || col > 10)
                 continue;
@@ -199,8 +216,10 @@ static int vtFilter(sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, in
         struct FilterProp {
             int col = 0;
             char op = 0;
-            std::string val;
             bool is_null = false;
+            bool is_numeric = false;
+            std::string str_val;
+            int64_t int_val = 0;
         };
 
         std::vector<FilterProp> filter_props;
@@ -223,25 +242,27 @@ static int vtFilter(sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, in
 
                 if (token.empty())
                     continue;
-                if (arg_idx >= argc) {
-                    throw std::runtime_error("vtFilter: constraint/argv mismatch");
-                }
+                if (arg_idx >= argc)
+                    throw std::runtime_error("vtFilter: constraint mismatch");
 
                 const char op = token.back();
-                const std::string col_str = token.substr(0, token.size() - 1);
-                const int col = std::stoi(col_str);
+                const int col = std::stoi(token.substr(0, token.size() - 1));
 
-                const bool is_null = (sqlite3_value_type(argv[arg_idx]) == SQLITE_NULL);
-                const unsigned char *text_val = sqlite3_value_text(argv[arg_idx]);
-                ++arg_idx;
+                sqlite3_value *sql_val = argv[arg_idx++];
+                int val_type = sqlite3_value_type(sql_val);
 
-                std::string val_str = text_val ? reinterpret_cast<const char *>(text_val) : "";
+                bool is_null = (val_type == SQLITE_NULL);
+                bool is_numeric = (val_type == SQLITE_INTEGER || val_type == SQLITE_FLOAT);
+                int64_t int_val = is_numeric ? sqlite3_value_int64(sql_val) : 0;
+
+                const unsigned char *text_ptr = sqlite3_value_text(sql_val);
+                std::string str_val = text_ptr ? reinterpret_cast<const char *>(text_ptr) : "";
 
                 if (col == 0 && op == '=') {
-                    filter_id = std::move(val_str);
+                    filter_id = std::move(str_val);
                     filter_id_is_null = is_null;
                 } else {
-                    filter_props.push_back(FilterProp{col, op, std::move(val_str), is_null});
+                    filter_props.push_back(FilterProp{col, op, is_null, is_numeric, std::move(str_val), int_val});
                 }
             }
         }
@@ -257,6 +278,8 @@ static int vtFilter(sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, in
                     return false;
 
                 std::string actual_str;
+                int64_t actual_int = 0;
+                bool actual_is_numeric = false;
 
                 if (prop.col == 0) {
                     actual_str = game->id;
@@ -266,37 +289,65 @@ static int vtFilter(sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, in
                         return false;
 
                     const auto& val = it->second;
-                    if (val.is<std::string>())
+
+                    // Extract based on underlying type
+                    if (val.is<std::string>()) {
                         actual_str = val.get<std::string>();
-                    else if (val.is<bool>())
-                        actual_str = val.get<bool>() ? "1" : "0";
-                    else if (val.is<int32_t>())
-                        actual_str = std::to_string(val.get<int32_t>());
-                    else if (val.is<int64_t>())
-                        actual_str = std::to_string(val.get<int64_t>());
-                    else if (val.is<int16_t>())
-                        actual_str = std::to_string(val.get<int16_t>());
-                    else if (val.is<uint8_t>())
-                        actual_str = std::to_string(val.get<uint8_t>());
-                    else
-                        return false;
+                    } else {
+                        actual_is_numeric = true;
+                        if (val.is<int32_t>())
+                            actual_int = val.get<int32_t>();
+                        else if (val.is<int64_t>())
+                            actual_int = val.get<int64_t>();
+                        else if (val.is<int16_t>())
+                            actual_int = val.get<int16_t>();
+                        else if (val.is<uint8_t>())
+                            actual_int = val.get<uint8_t>();
+                        else if (val.is<bool>())
+                            actual_int = val.get<bool>() ? 1 : 0;
+                        else
+                            return false;
+
+                        actual_str = std::to_string(actual_int); // Fallback for string operators
+                    }
                 } else {
-                    // Out-of-range column request
-                    return false;
+                    return false; // Out-of-range
                 }
 
+                // Evaluate operators
                 if (prop.op == '=') {
-                    if (sqlite3_stricmp(actual_str.c_str(), prop.val.c_str()) != 0)
+                    if (sqlite3_stricmp(actual_str.c_str(), prop.str_val.c_str()) != 0)
                         return false;
                 } else if (prop.op == 'L') {
-                    if (sqlite3_strlike(prop.val.c_str(), actual_str.c_str(), 0) != 0)
+                    if (sqlite3_strlike(prop.str_val.c_str(), actual_str.c_str(), 0) != 0)
                         return false;
                 } else if (prop.op == 'G') {
-                    if (sqlite3_strglob(prop.val.c_str(), actual_str.c_str()) != 0)
+                    if (sqlite3_strglob(prop.str_val.c_str(), actual_str.c_str()) != 0)
                         return false;
                 } else {
-                    // Unknown op
-                    return false;
+                    // Inequalities
+                    if (prop.is_numeric && actual_is_numeric) {
+                        // Numeric comparison
+                        if (prop.op == '>' && !(actual_int > prop.int_val))
+                            return false;
+                        if (prop.op == '<' && !(actual_int < prop.int_val))
+                            return false;
+                        if (prop.op == ']' && !(actual_int >= prop.int_val))
+                            return false;
+                        if (prop.op == '[' && !(actual_int <= prop.int_val))
+                            return false;
+                    } else {
+                        // Fallback to lexicographical string comparison
+                        int cmp = sqlite3_stricmp(actual_str.c_str(), prop.str_val.c_str());
+                        if (prop.op == '>' && !(cmp > 0))
+                            return false;
+                        if (prop.op == '<' && !(cmp < 0))
+                            return false;
+                        if (prop.op == ']' && !(cmp >= 0))
+                            return false;
+                        if (prop.op == '[' && !(cmp <= 0))
+                            return false;
+                    }
                 }
             }
             return true;
