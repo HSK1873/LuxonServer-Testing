@@ -377,7 +377,7 @@ strip_binaries:
   stage: strip
   image: debian:trixie
   before_script:
-    - apt-get update && apt-get install -y llvm
+    - apt-get update && apt-get install -y llvm xz-utils
   script:
     - rm -rf build/*.vcxproj* build/*.dir
     - |
@@ -389,6 +389,9 @@ strip_binaries:
 
           echo "Stripping $release_file..."
           llvm-strip "$release_file" || true
+          
+          echo "Compressing $file to .xz..."
+          xz -z "$file"
         fi
       done
   artifacts:
