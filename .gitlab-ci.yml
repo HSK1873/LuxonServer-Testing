@@ -413,7 +413,7 @@ pages:
 
     # Build repository indices
     - cd public/debian
-    - dpkg-scanpackages . /dev/null > Packages
+    - dpkg-scanpackages -m . /dev/null > Packages
     - gzip -k -9 Packages
     - apt-ftparchive release . > Release
 
