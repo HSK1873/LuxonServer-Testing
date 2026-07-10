@@ -1,5 +1,33 @@
 luxon-server (1.4) UNRELEASED; urgency=low
 
-  * Initial release. TODO: FILL IN!!!
+  * Added Mac OS Support
+  * Added CI builds for Mac OS (amd64, aarch64), FreeBSD (amd64),
+    OpenBSD (amd64), Windows Vista (i386), Linux (i686, armhf), Java 17, DOS
+  * Added WebAssembly (preview 1 / WASI) support
+  * Several IPv6 fixes
+  * Improved CMake option constraints
+  * Improved RaisEvent handler
+  * Fixed Tracy on Windows
+  * Allow disabling TickTimeBudget
+  * Replaced stackfull coroutines with command restarting
+  * Implemented FFI
+  * Fixed ChangeInterestGroup implementation
+  * Updated configuration format to unambiguious
+  * Implemented multiprocessing for GameServer
+  * Removed "external servers" configuration in favor or "proxies"
+  * Fixed crash with ENet peer callback reset
+  * Fixed lobby/app stat confusion
+  * Send MasterServer stats as unreliable events
+  * Defer connection destruction until after handlers are done
+  * Several SQL lobby fixes/improvements
+  * Do not hold shared pointer when joining game, just ID
+  * Fixed loss of -0.0 value
+  * Make sure peer is already in game when PluginBase::OnJoinGame is called
+  * Revert game join properly
+  * Handle GameServer disconnects properly, fixing master client confusion
+    on disconnect
+  * Allow ser Message/Value to be non-owning, avoiding some data copies
+  * More complete GP Binary v1.6 implementation
+  * Build Debian packages in CI
 
  -- Tuxifan <tuxifan@posteo.de>  Fri, 10 Jul 2026 13:06:38 +0200
