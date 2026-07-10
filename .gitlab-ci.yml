@@ -1,10 +1,40 @@
 stages:
+  - verify
   - build
   - strip
+  - publish
 
 variables:
   GIT_SUBMODULE_STRATEGY: recursive
   CMAKE_GENERATOR: Ninja
+
+# Verify that release tag matches Debian package version
+verify:debian_tag_version:
+  stage: verify
+  image: debian:trixie
+  rules:
+    - if: $CI_COMMIT_TAG
+  before_script:
+    - apt-get update
+    - apt-get install -y dpkg-dev
+  script:
+    - |
+      set -eu
+
+      TAG_VERSION="${CI_COMMIT_TAG#v}"
+      DEB_VERSION="$(dpkg-parsechangelog -S Version)"
+      DEB_UPSTREAM_VERSION="${DEB_VERSION%-*}"
+
+      echo "Tag version:      ${TAG_VERSION}"
+      echo "Debian version:   ${DEB_VERSION}"
+      echo "Upstream version: ${DEB_UPSTREAM_VERSION}"
+
+      if [ "${DEB_VERSION}" != "${TAG_VERSION}" ] && [ "${DEB_UPSTREAM_VERSION}" != "${TAG_VERSION}" ]; then
+        echo "ERROR: Git tag '${CI_COMMIT_TAG}' does not match Debian package version '${DEB_VERSION}'."
+        echo "Expected tag version '${TAG_VERSION}' to equal either the full Debian version"
+        echo "or its upstream part before the Debian revision."
+        exit 1
+      fi
 
 .build_template:
   stage: build
@@ -15,69 +45,59 @@ variables:
 
 .build_deb_template:
   stage: build
-  image: debian:trixie
+  image: "debian:${DEBIAN_SUITE}"
   artifacts:
     paths:
-      - "*.deb"
-      - "*.buildinfo"
-      - "*.changes"
+      - debian-packages/
     expire_in: 1 week
 
-# Native AMD64 Debian Build
-build:deb:amd64:
+# Debian package builds for several suites and archs
+build:deb:
   extends: .build_deb_template
+  parallel:
+    matrix:
+      - DEBIAN_SUITE: [trixie, unstable]
+        DEB_TARGET_ARCH: [amd64, arm64, i386, riscv64, ppc64el, s390x]
   before_script:
-    - apt-get update 
-    - apt-get install -y dpkg-dev debhelper build-essential cmake ninja-build git libmbedtls-dev libspdlog-dev
+    - |
+      set -eu
+
+      HOST_ARCH="$(dpkg --print-architecture)"
+
+      if [ "${DEB_TARGET_ARCH}" != "${HOST_ARCH}" ]; then
+        dpkg --add-architecture "${DEB_TARGET_ARCH}"
+      fi
+
+      apt-get update
+      apt-get install -y dpkg-dev debhelper cmake ninja-build git
+
+      if [ "${DEB_TARGET_ARCH}" = "${HOST_ARCH}" ]; then
+        apt-get install -y build-essential libmbedtls-dev libspdlog-dev
+      else
+        apt-get install -y \
+          "crossbuild-essential-${DEB_TARGET_ARCH}" \
+          "libmbedtls-dev:${DEB_TARGET_ARCH}" \
+          "libspdlog-dev:${DEB_TARGET_ARCH}"
+      fi
   script:
-    - dpkg-buildpackage -us -uc -b
-    - mv ../*.deb ../*.buildinfo ../*.changes . || true
+    - |
+      set -eu
 
-# Cross-compilation Debian Build Template
-.build_deb_cross_template:
-  extends: .build_deb_template
-  variables:
-    DEB_TARGET_ARCH: ""
-  before_script:
-    - dpkg --add-architecture $DEB_TARGET_ARCH
-    - apt-get update
-    - apt-get install -y dpkg-dev debhelper cmake ninja-build git
-    - apt-get install -y crossbuild-essential-$DEB_TARGET_ARCH libmbedtls-dev:$DEB_TARGET_ARCH libspdlog-dev:$DEB_TARGET_ARCH
-  script:
-    - dpkg-buildpackage -a$DEB_TARGET_ARCH -us -uc -b
-    - mv ../*.deb ../*.buildinfo ../*.changes . || true
+      HOST_ARCH="$(dpkg --print-architecture)"
+      OUTDIR="debian-packages/${DEBIAN_SUITE}/${DEB_TARGET_ARCH}"
+      mkdir -p "${OUTDIR}"
 
-# Instantiate Debian cross-builds
-build:deb:arm64:
-  extends: .build_deb_cross_template
-  variables:
-    DEB_TARGET_ARCH: arm64
+      sed -i "1 s/UNRELEASED/${DEBIAN_SUITE}/" debian/changelog
 
-# TODO: There is some issue with armhf right now!
-# build:deb:armhf:
-#   extends: .build_deb_cross_template
-#   variables:
-#     DEB_TARGET_ARCH: armhf
+      if [ "${DEB_TARGET_ARCH}" = "${HOST_ARCH}" ]; then
+        dpkg-buildpackage -us -uc -b
+      else
+        dpkg-buildpackage -a"${DEB_TARGET_ARCH}" -us -uc -b
+      fi
 
-build:deb:i386:
-  extends: .build_deb_cross_template
-  variables:
-    DEB_TARGET_ARCH: i386
-
-build:deb:riscv64:
-  extends: .build_deb_cross_template
-  variables:
-    DEB_TARGET_ARCH: riscv64
-
-build:deb:ppc64el:
-  extends: .build_deb_cross_template
-  variables:
-    DEB_TARGET_ARCH: ppc64el
-
-build:deb:s390x:
-  extends: .build_deb_cross_template
-  variables:
-    DEB_TARGET_ARCH: s390x
+      mv ../*.deb "${OUTDIR}/"
+      mv ../*.buildinfo "${OUTDIR}/"
+      mv ../*.changes "${OUTDIR}/"
 
 # RelWithDebInfo static build amd64 via alpine
 build:alpine:amd64:
@@ -364,9 +384,9 @@ strip_binaries:
       for file in build/*rel+debinfo*; do
         if [ -f "$file" ]; then
           release_file=$(echo "$file" | sed 's/rel+debinfo/release/')
-          
+
           cp "$file" "$release_file"
-          
+
           echo "Stripping $release_file..."
           llvm-strip "$release_file" || true
         fi
@@ -375,3 +395,28 @@ strip_binaries:
     paths:
       - build/luxon_server*
     expire_in: 1 week
+
+# Publish Debian packages via pages
+pages:
+  stage: publish
+  image: debian:trixie
+  rules:
+    - if: $CI_COMMIT_TAG
+  before_script:
+    - apt-get update
+    - apt-get install -y dpkg-dev apt-utils
+  script:
+    - mkdir -p public/debian
+
+    # Gather generated .deb packages from matrix builds
+    - find debian-packages -type f -name '*.deb' -exec cp {} public/debian/ \;
+
+    # Build repository indices
+    - cd public/debian
+    - dpkg-scanpackages . /dev/null > Packages
+    - gzip -k -9 Packages
+    - apt-ftparchive release . > Release
+
+  artifacts:
+    paths:
+      - public
