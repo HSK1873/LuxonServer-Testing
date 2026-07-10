@@ -85,5 +85,14 @@ CMakeLists.txt.user*
 .vs
 out
 
+# Debian packaging artifacts
+/debian/.debhelper/
+/debian/luxon-server/
+/debian/files
+/debian/*.substvars
+/debian/*.debhelper
+/debian/debhelper-build-stamp
+/obj-*/
+
 config.yml
 dependency-reduced-pom.xml

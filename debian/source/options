@@ -1,0 +1,3 @@
+tar-ignore = "vcpkg"
+tar-ignore = "WASMImpl/C/cwsdpmi.exe"
+tar-ignore = ".git"
