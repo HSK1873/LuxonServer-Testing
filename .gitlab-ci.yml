@@ -13,6 +13,72 @@ variables:
       - build/luxon_server.*
     expire_in: 1 week
 
+.build_deb_template:
+  stage: build
+  image: debian:trixie
+  artifacts:
+    paths:
+      - "*.deb"
+      - "*.buildinfo"
+      - "*.changes"
+    expire_in: 1 week
+
+# Native AMD64 Debian Build
+build:deb:amd64:
+  extends: .build_deb_template
+  before_script:
+    - apt-get update 
+    - apt-get install -y dpkg-dev debhelper build-essential cmake ninja-build git libmbedtls-dev libspdlog-dev
+  script:
+    - dpkg-buildpackage -us -uc -b
+    - mv ../*.deb ../*.buildinfo ../*.changes . || true
+
+# Cross-compilation Debian Build Template
+.build_deb_cross_template:
+  extends: .build_deb_template
+  variables:
+    DEB_TARGET_ARCH: ""
+  before_script:
+    - dpkg --add-architecture $DEB_TARGET_ARCH
+    - apt-get update
+    - apt-get install -y dpkg-dev debhelper cmake ninja-build git
+    - apt-get install -y crossbuild-essential-$DEB_TARGET_ARCH libmbedtls-dev:$DEB_TARGET_ARCH libspdlog-dev:$DEB_TARGET_ARCH
+  script:
+    - dpkg-buildpackage -a$DEB_TARGET_ARCH -us -uc -b
+    - mv ../*.deb ../*.buildinfo ../*.changes . || true
+
+# Instantiate Debian cross-builds
+build:deb:arm64:
+  extends: .build_deb_cross_template
+  variables:
+    DEB_TARGET_ARCH: arm64
+
+# TODO: There is some issue with armhf right now!
+# build:deb:armhf:
+#   extends: .build_deb_cross_template
+#   variables:
+#     DEB_TARGET_ARCH: armhf
+
+build:deb:i386:
+  extends: .build_deb_cross_template
+  variables:
+    DEB_TARGET_ARCH: i386
+
+build:deb:riscv64:
+  extends: .build_deb_cross_template
+  variables:
+    DEB_TARGET_ARCH: riscv64
+
+build:deb:ppc64el:
+  extends: .build_deb_cross_template
+  variables:
+    DEB_TARGET_ARCH: ppc64el
+
+build:deb:s390x:
+  extends: .build_deb_cross_template
+  variables:
+    DEB_TARGET_ARCH: s390x
+
 # RelWithDebInfo static build amd64 via alpine
 build:alpine:amd64:
   extends: .build_template
@@ -23,40 +89,6 @@ build:alpine:amd64:
     - cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_EXE_LINKER_FLAGS="-static"
     - cmake --build build
     - mv build/luxon_server build/luxon_server.musl-static.rel+debinfo.linux-x86_64
-
-# RelWithDebInfo build amd64 via Debian Trixie
-build:debian:amd64:
-  extends: .build_template
-  image: debian:trixie
-  before_script:
-    - apt-get update && apt-get install -y build-essential cmake ninja-build git libmbedtls-dev libspdlog-dev
-  script:
-    - cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_UNITY_BUILD=ON
-    - cmake --build build
-    - mv build/luxon_server build/luxon_server.glibc.rel+debinfo.linux-x86_64
-
-# RelWithDebInfo build amd64 via Debian Trixie with fully exposed FFI
-build_fullffi:debian:amd64:
-  extends: .build_template
-  image: debian:trixie
-  before_script:
-    - apt-get update && apt-get install -y build-essential cmake ninja-build git libmbedtls-dev libspdlog-dev
-  script:
-    - cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_UNITY_BUILD=ON -DLUXON_SERVER_BUILD_FFI=ON -DLUXON_SERVER_EXPOSE_FULL_FFI=ON
-    - cmake --build build
-    - mv build/libluxon_server_ffi.so build/luxon_server.fullffi.glibc.rel+debinfo.linux-x86_64
-
-# RelWithDebInfo build aarch64 via Debian Trixie
-build:debian:aarch64:
-  extends: .build_template
-  image: debian:trixie
-  before_script:
-    - dpkg --add-architecture arm64
-    - apt-get update && apt-get install -y build-essential crossbuild-essential-arm64 cmake ninja-build git pkg-config libmbedtls-dev:arm64 libspdlog-dev:arm64
-  script:
-    - cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_UNITY_BUILD=ON -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
-    - cmake --build build
-    - mv build/luxon_server build/luxon_server.glibc.rel+debinfo.linux-aarch64
 
 # RelWithDebInfo static build i686 via Alpine
 build:alpine:i686:
