@@ -54,9 +54,6 @@ Lobby::Lobby(std::shared_ptr<App> app, std::string name, uint8_t type) : app(std
             throw std::runtime_error(std::format("Failed to set database to read-only: {}", error_message));
         }
 
-        // Abort query after 100000 internal operations
-        sqlite3_progress_handler(sql, 100000, [](void *) -> int { return 1; }, nullptr);
-
         // Limit depth of expression trees
         sqlite3_limit(sql, SQLITE_LIMIT_EXPR_DEPTH, 20);
 
@@ -168,6 +165,9 @@ LobbyInfo Lobby::get_lobby_info() const {
 
 std::vector<std::string> Lobby::query_lobbies(const std::string& sql_queries) {
     ZoneScoped;
+
+    // Abort query after specific amount of internal operations, depending on game count
+    sqlite3_progress_handler(sql, 140 * games.size(), [](void *) -> int { return 1; }, nullptr);
 
     // Split into list of queries
     std::vector<std::string_view> queries = common::utils::str_split(sql_queries, ';', 3);
