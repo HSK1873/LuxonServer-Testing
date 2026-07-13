@@ -48,11 +48,18 @@ void NameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
         case OpCodes::RpcAndMisc::GetRegions: {
             ZoneScopedN("HandleOperationRequest_GetRegions");
 
+            // Build dummy response with all regions
+            std::vector<std::string> regions = {"asia", "au", "cae", "cn", "eu", "hk", "in", "jp", "za", "sa", "kr", "tr", "uae", "us", "usw", "ussc"};
+
+            std::vector<std::string> addresses(regions.size());
+            for (size_t i = 0; i < regions.size(); ++i)
+                addresses[i] = std::string(server_manager_.get_random_server_address(ServerType::MasterServer, peer_->transport_protocol));
+
             // Give dummy response
             ser::OperationResponseMessage resp{.operation_code = OpCodes::RpcAndMisc::GetRegions, .return_code = 0};
-            resp.parameters[DictKeyCodes::AuthAndLobby::Region] = std::vector<std::string>{"eu"};
-            resp.parameters[DictKeyCodes::LoadBalancing::Address] =
-                std::vector<std::string>{std::string(server_manager_.get_random_server_address(ServerType::MasterServer, peer_->transport_protocol))};
+            resp.parameters[DictKeyCodes::AuthAndLobby::Region] = std::move(regions);
+            resp.parameters[DictKeyCodes::LoadBalancing::Address] = std::move(addresses);
+
             send(proto_->Serialize(resp));
             return;
         }
