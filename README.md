@@ -25,7 +25,7 @@ The goal of this project is to be a drop-in replacement for the official server 
 > 
 > Any use of the term "Photon" within this repository is for descriptive purposes only, to indicate compatibility, and does not imply any endorsement or official relationship.
 > 
-> Luxon Server is NOT a competitive product, and will never intersect with the group of people that would generate Exit Games any income. Luxon Server intentionally lacks important features that make the Photon Server SDK useful to paying Exit Games customers (most importantly scalability and load balancing).
+> Luxon Server is NOT a competitive product, and will never intersect with the group of people that would generate Exit Games any income. Luxon Server intentionally lacks important features that make the Photon Server SDK useful to paying Exit Games customers (most importantly scalability and load balancing). Additionally its entire architecture is based around the idea of simplicity, not scalability.
 >
 > If you are a representative of Exit Games and have concerns regarding this project, please contact me at tuxifan@posteo.de so I may address them promptly.
 
@@ -84,7 +84,25 @@ For most users, the easiest and most stable way to get started is to download th
 If you need the absolute latest features or bug fixes that haven't been released yet, you can download the build artifacts directly from the CI pipelines.
 * [Download from GitLab Pipelines](https://gitlab.com/luxon_project/LuxonServer/-/pipelines)
 
-### 3. Build from Source
+### 3. Download from Debian repository
+In case you're on Debian (any arch, oldstable/stable/unstable), you can install stable Luxon Server from the Debian repository:
+
+```
+# Add repository
+echo 'deb [trusted=yes] https://luxonserver-9065cb.gitlab.io/debian ./' | sudo tee /etc/apt/sources.list.d/luxon-server.list
+
+# Refresh apt and install Luxon Server
+sudo apt update
+sudo apt install luxon-server
+
+# Edit and apply configuration
+sudoedit /etc/luxon_server/config.yml
+sudo systemctl restart luxon-server.service
+```
+
+Note that the repository is currently *unsigned* due to CI limitations I have yet to overcome. This is not normally a problem because of HTTPS. However it means that if for example the gitlab.io domain was abandoned (highly unlikely) someone could take over the repository and install malware.
+
+### 4. Build from Source
 If you prefer to compile the server yourself, plan to modify the code, or would like to use plugins you can build Luxon Server from source.
 
 #### Prerequisites
