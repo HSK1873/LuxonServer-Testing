@@ -40,6 +40,9 @@ PEAK
 Phasmophobia
 + Works flawlessly
 
+Rec Room:
++ Reported as working with NameServer rewrite plugin
+
 R.E.P.O.
 + Works flawlessly
 
