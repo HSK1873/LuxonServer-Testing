@@ -294,8 +294,9 @@ void luxonSetServerImports(const LuxonServerImports *imports) {
  * ============================================================================ */
 
 template <unsigned Type>
-static server::auth_plugins::registry::AuthResult auth_callback_thunk(const std::string& requested_user_id, const std::string& params, const std::string& data,
-                                                                      const std::optional<std::string>& secret, const std::optional<std::string>& auth_url) {
+static server::auth_plugins::registry::AuthResult auth_callback_thunk(server::ServerManager&, const std::string& requested_user_id, const std::string& params,
+                                                                      const std::string& data, const std::optional<std::string>& secret,
+                                                                      const std::optional<std::string>& auth_url) {
     char out_user_id[256];
     out_user_id[0] = '\0';
     luxon::ser::Message err_msg{luxon::ser::OperationResponseMessage{}};
