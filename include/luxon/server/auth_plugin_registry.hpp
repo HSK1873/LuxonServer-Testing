@@ -11,14 +11,16 @@
 #include <luxon/ser_types.hpp>
 
 namespace server {
+class ServerManager;
+
 namespace auth_plugins {
 namespace registry {
 using AuthResult = std::expected<std::string, ser::OperationResponseMessage>;
-using AuthCallback = AuthResult (*)(const std::string& requested_user_id, const std::string& params, const std::string& data,
+using AuthCallback = AuthResult (*)(ServerManager&, const std::string& requested_user_id, const std::string& params, const std::string& data,
                                     const std::optional<std::string>& secret, const std::optional<std::string>& auth_url);
 
 bool register_(unsigned type, AuthCallback callback);
-std::optional<AuthResult> call(unsigned type, const std::string& requested_user_id, const std::string& params, const std::string& data,
+std::optional<AuthResult> call(ServerManager&, unsigned type, const std::string& requested_user_id, const std::string& params, const std::string& data,
                                const std::optional<std::string>& secret, const std::optional<std::string>& auth_url);
 } // namespace registry
 } // namespace auth_plugins

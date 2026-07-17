@@ -18,8 +18,8 @@ bool register_(unsigned type, AuthCallback callback) {
     return plugins->emplace(type, callback).second;
 }
 
-std::optional<AuthResult> call(unsigned int type, const std::string& requested_user_id, const std::string& params, const std::string& data,
-                               const std::optional<std::string>& secret, const std::optional<std::string>& auth_url) {
+std::optional<AuthResult> call(ServerManager& server_manager, unsigned int type, const std::string& requested_user_id, const std::string& params,
+                               const std::string& data, const std::optional<std::string>& secret, const std::optional<std::string>& auth_url) {
     if (!plugins)
         return std::nullopt;
 
@@ -27,7 +27,7 @@ std::optional<AuthResult> call(unsigned int type, const std::string& requested_u
     if (res == plugins->end())
         return std::nullopt;
 
-    return res->second(requested_user_id, params, data, secret, auth_url);
+    return res->second(server_manager, requested_user_id, params, data, secret, auth_url);
 }
 } // namespace registry
 } // namespace auth_plugins
