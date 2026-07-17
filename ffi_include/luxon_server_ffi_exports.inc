@@ -30,6 +30,7 @@ FFI_HANDLE_TYPE(SerValueHandle)
 FFI_HANDLE_TYPE(SerMessageHandle)
 FFI_HANDLE_TYPE(HandlerBaseHandle)
 FFI_HANDLE_TYPE(CommandRestarterHandle)
+FFI_HANDLE_TYPE(CoroutineHandle)
 
 /* ============================================================================
  * FUNCTIONS TABLE
@@ -45,6 +46,15 @@ FFI_FUNCTION(const char *, luxonGetLastErrorType, (), )
 FFI_FUNCTION(const char *, luxonGetLastErrorMessage, (), )
 /** @brief Clears the current thread's error state */
 FFI_FUNCTION(void, luxonClearLastError, (), )
+
+/* --- COROUTINES INTERFACE --- */
+
+/** @brief Gets handle of the currently active coroutine */
+CoroutineHandle luxonGetActiveCoroutine();
+/** @brief Resumes a given coroutine */
+void luxonResumeCoroutine(CoroutineHandle handle, uint8_t result);
+/** @brief Destroys a given coroutine, avoid! */
+void luxonDestroyCoroutine(CoroutineHandle handle);
 
 /* --- BYTE ARRAY INTERFACE --- */
 

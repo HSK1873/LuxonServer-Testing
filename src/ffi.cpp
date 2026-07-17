@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include <stack>
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
@@ -42,6 +43,9 @@
 #include <typeinfo>
 #include <cstring>
 #include <cstddef>
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
+#include <FfiAwaiter.hpp>
+#endif
 
 /* ============================================================================
  * INTERNAL FFI STATE & ERROR MANAGEMENT
@@ -123,6 +127,11 @@ template <typename HandleT> inline HandleT wrap(std::nullptr_t) {
 #endif
 }
 
+struct FfiCoroContext {
+    void *awaiter_handle = nullptr;
+};
+static thread_local std::stack<FfiCoroContext *> t_coro_stack;
+
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
 static std::atomic<uint32_t> g_next_plugin_id{1};
 
@@ -140,6 +149,7 @@ public:
     }
 
     server::Awaitable<> OnAttach() override {
+        // TODO: Make coroutine compatible
 #if defined(FFI_WASM) || defined(__wasm__)
         gamePluginOnAttach(plugin_id_, wrap<GameHandle>(game_));
 #else
@@ -151,6 +161,9 @@ public:
 
     server::Awaitable<server::game_plugins::Result> OnCreateGame(luxon::ser::OperationRequestMessage& req,
                                                                  server::game_plugins::OnCreateGameCallInfo& info) override {
+        FfiCoroContext ctx;
+        t_coro_stack.push(&ctx);
+
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -161,12 +174,21 @@ public:
             res = g_imports.gamePluginOnCreateGame(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<PeerHandle>(info.creator.get()),
                                                    info.is_join, info.create_if_not_exist);
 #endif
+
+        t_coro_stack.pop();
+
+        if (res == LUXON_PLUGIN_RESULT_ASYNC)
+            res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
     }
 
     server::Awaitable<server::game_plugins::Result> BeforeJoin(luxon::ser::OperationRequestMessage& req,
                                                                server::game_plugins::BeforeJoinGameCallInfo& info) override {
+        FfiCoroContext ctx;
+        t_coro_stack.push(&ctx);
+
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -175,12 +197,21 @@ public:
         if (g_imports.gamePluginBeforeJoin)
             res = g_imports.gamePluginBeforeJoin(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<PeerHandle>(info.joiner.get()));
 #endif
+
+        t_coro_stack.pop();
+
+        if (res == LUXON_PLUGIN_RESULT_ASYNC)
+            res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
     }
 
     server::Awaitable<server::game_plugins::Result> OnJoinGame(luxon::ser::OperationRequestMessage& req,
                                                                server::game_plugins::OnJoinGameCallInfo& info) override {
+        FfiCoroContext ctx;
+        t_coro_stack.push(&ctx);
+
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -189,12 +220,21 @@ public:
         if (g_imports.gamePluginOnJoinGame)
             res = g_imports.gamePluginOnJoinGame(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.joiner));
 #endif
+
+        t_coro_stack.pop();
+
+        if (res == LUXON_PLUGIN_RESULT_ASYNC)
+            res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
     }
 
     server::Awaitable<server::game_plugins::Result> OnLeave(luxon::ser::OperationRequestMessage& req,
                                                             server::game_plugins::OnLeaveGameCallInfo& info) override {
+        FfiCoroContext ctx;
+        t_coro_stack.push(&ctx);
+
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -203,12 +243,21 @@ public:
         if (g_imports.gamePluginOnLeave)
             res = g_imports.gamePluginOnLeave(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.leaver));
 #endif
+
+        t_coro_stack.pop();
+
+        if (res == LUXON_PLUGIN_RESULT_ASYNC)
+            res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
     }
 
     server::Awaitable<server::game_plugins::Result> OnRaiseEvent(luxon::ser::OperationRequestMessage& req,
                                                                  server::game_plugins::OnRaiseEventCallInfo& info) override {
+        FfiCoroContext ctx;
+        t_coro_stack.push(&ctx);
+
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -219,12 +268,21 @@ public:
             res = g_imports.gamePluginOnRaiseEvent(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.raiser),
                                                    wrap<EventHandle>(&info.event), info.cache_op);
 #endif
+
+        t_coro_stack.pop();
+
+        if (res == LUXON_PLUGIN_RESULT_ASYNC)
+            res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
     }
 
     server::Awaitable<server::game_plugins::Result> BeforeSetProperties(luxon::ser::OperationRequestMessage& req,
                                                                         server::game_plugins::BeforeSetPropertiesCallInfo& info) override {
+        FfiCoroContext ctx;
+        t_coro_stack.push(&ctx);
+
         uint8_t res = 0;
         luxon::ser::Value up_val(info.update);
         luxon::ser::Value exp_val(info.expected);
@@ -238,12 +296,21 @@ public:
                                                           wrap<GamePeerHandle>(info.setter), info.broadcast, info.target_actor_id,
                                                           wrap<SerValueHandle>(&up_val), wrap<SerValueHandle>(&exp_val));
 #endif
+
+        t_coro_stack.pop();
+
+        if (res == LUXON_PLUGIN_RESULT_ASYNC)
+            res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
     }
 
     server::Awaitable<server::game_plugins::Result> OnSetProperties(luxon::ser::OperationRequestMessage& req,
                                                                     server::game_plugins::OnSetPropertiesCallInfo& info) override {
+        FfiCoroContext ctx;
+        t_coro_stack.push(&ctx);
+
         uint8_t res = 0;
         luxon::ser::Value up_val(info.update);
         luxon::ser::Value exp_val(info.expected);
@@ -256,6 +323,12 @@ public:
             res = g_imports.gamePluginOnSetProperties(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.setter),
                                                       info.broadcast, info.target_actor_id, wrap<SerValueHandle>(&up_val), wrap<SerValueHandle>(&exp_val));
 #endif
+
+        t_coro_stack.pop();
+
+        if (res == LUXON_PLUGIN_RESULT_ASYNC)
+            res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
     }
@@ -356,6 +429,38 @@ const char *luxonGetLastErrorType() { return t_last_error_type.c_str(); }
 const char *luxonGetLastErrorMessage() { return t_last_error_msg.c_str(); }
 
 void luxonClearLastError() { clear_ffi_error(); }
+
+/* ============================================================================
+ * COROUTINES IMPLEMENTATION
+ * ============================================================================ */
+
+CoroutineHandle luxonGetActiveCoroutine() {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
+    if (t_coro_stack.empty()) {
+        return wrap<CoroutineHandle>(nullptr);
+    }
+    // Return the top-most context on the stack
+    return wrap<CoroutineHandle>(t_coro_stack.top());
+#else
+    return wrap<CoroutineHandle>(nullptr);
+#endif
+}
+
+void luxonResumeCoroutine(CoroutineHandle handle, uint8_t result) {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
+    auto *ctx = unwrap<FfiCoroContext>(handle);
+    if (ctx && ctx->awaiter_handle)
+        basiccoro::FfiAwaiter<uint8_t, void (*)(void *)>::resume(ctx->awaiter_handle, result);
+#endif
+}
+
+void luxonDestroyCoroutine(CoroutineHandle handle) {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
+    auto *ctx = unwrap<FfiCoroContext>(handle);
+    if (ctx && ctx->awaiter_handle)
+        basiccoro::FfiAwaiter<uint8_t, void (*)(void *)>::cancel(ctx);
+#endif
+}
 
 /* ============================================================================
  * BYTE ARRAY IMPLEMENTATION
@@ -1818,48 +1923,72 @@ void registerHookpoints(ServerManagerHandle manager) {
 
         m->hookpoints.MasterServer_HandleOperationRequest_JoinGame = [](server::MasterServerHandler& handler, const std::string& game_id,
                                                                         bool is_join) -> Awaitable<bool> {
+            FfiCoroContext ctx;
+            t_coro_stack.push(&ctx);
+
+            uint8_t res = 0;
+
 #if defined(FFI_WASM) || defined(__wasm__)
-            lco_return hookpointMasterServerHandleOperationRequestJoinGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str(), is_join);
+            res = hookpointMasterServerHandleOperationRequestJoinGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str(), is_join);
 #else
             if (g_imports.hookpointMasterServerHandleOperationRequestJoinGame)
-                lco_return g_imports.hookpointMasterServerHandleOperationRequestJoinGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str(), is_join);
-            lco_return false;
+                res = g_imports.hookpointMasterServerHandleOperationRequestJoinGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str(), is_join);
 #endif
+
+            t_coro_stack.pop();
+
+            if (res == LUXON_HOOKPOINT_RESULT_ASYNC)
+                res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+
+            lco_return res == LUXON_HOOKPOINT_RESULT_OVERRIDE;
         };
 
         m->hookpoints.MasterServer_HandleOperationRequest_CreateGame = [](server::MasterServerHandler& handler, const std::string& game_id) -> Awaitable<bool> {
+            FfiCoroContext ctx;
+            t_coro_stack.push(&ctx);
+
+            uint8_t res = 0;
+
 #if defined(FFI_WASM) || defined(__wasm__)
-            lco_return hookpointMasterServerHandleOperationRequestCreateGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str());
+            res = hookpointMasterServerHandleOperationRequestCreateGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str());
 #else
             if (g_imports.hookpointMasterServerHandleOperationRequestCreateGame)
-                lco_return g_imports.hookpointMasterServerHandleOperationRequestCreateGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str());
-            lco_return false;
+                res = g_imports.hookpointMasterServerHandleOperationRequestCreateGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str());
 #endif
+
+            t_coro_stack.pop();
+
+            if (res == LUXON_HOOKPOINT_RESULT_ASYNC)
+                res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+
+            lco_return res == LUXON_HOOKPOINT_RESULT_OVERRIDE;
         };
 
         m->hookpoints.HandlerBase_HandleENetCommand_OnMessage = [](server::HandlerBase& handler, luxon::ser::Message& message,
                                                                    luxon::enet::EnetCommandHeader& /*header*/) -> Awaitable<bool> {
+            FfiCoroContext ctx;
+            t_coro_stack.push(&ctx);
+
+            uint8_t res = 0;
+
 #if defined(FFI_WASM) || defined(__wasm__)
-            lco_return hookpointHandlerBaseHandleENetCommandOnMessage(wrap<HandlerBaseHandle>(&handler), wrap<SerMessageHandle>(&message));
+            res = hookpointHandlerBaseHandleENetCommandOnMessage(wrap<HandlerBaseHandle>(&handler), wrap<SerMessageHandle>(&message));
 #else
             if (g_imports.hookpointHandlerBaseHandleENetCommandOnMessage)
-                lco_return g_imports.hookpointHandlerBaseHandleENetCommandOnMessage(wrap<HandlerBaseHandle>(&handler), wrap<SerMessageHandle>(&message));
-            lco_return false;
+                res = g_imports.hookpointHandlerBaseHandleENetCommandOnMessage(wrap<HandlerBaseHandle>(&handler), wrap<SerMessageHandle>(&message));
 #endif
+
+            t_coro_stack.pop();
+
+            if (res == LUXON_HOOKPOINT_RESULT_ASYNC)
+                res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+
+            lco_return res == LUXON_HOOKPOINT_RESULT_OVERRIDE;
         };
 
         m->hookpoints.App_load_app_settings = [](server::App& app, server::AppSettings& /*settings*/, bool& success) -> bool {
-            bool out_success = false;
-            bool handled = false;
-#if defined(FFI_WASM) || defined(__wasm__)
-            handled = hookpointAppLoadAppSettings(&app, &out_success);
-#else
-            if (g_imports.hookpointAppLoadAppSettings)
-                handled = g_imports.hookpointAppLoadAppSettings(&app, &out_success);
-#endif
-            if (handled)
-                success = out_success;
-            return handled;
+            // TODO: Implement
+            return false;
         };
     });
 #endif

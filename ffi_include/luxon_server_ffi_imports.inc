@@ -220,7 +220,8 @@ FFI_IMPORT_PAD(customLogSink)
  * @param is_join True if it's a direct join, False if it's potentially a CreateOrJoin
  * @return True to allow normal execution, False to halt processing
  */
-FFI_IMPORT(bool, hookpointMasterServerHandleOperationRequestJoinGame, (HandlerBaseHandle handler, const char *game_id, bool is_join), handler, game_id, is_join)
+FFI_IMPORT(uint8_t, hookpointMasterServerHandleOperationRequestJoinGame, (HandlerBaseHandle handler, const char *game_id, bool is_join), handler, game_id,
+           is_join)
 
 /**
  * @brief Intercepts MasterServer requests for creating a game
@@ -228,7 +229,7 @@ FFI_IMPORT(bool, hookpointMasterServerHandleOperationRequestJoinGame, (HandlerBa
  * @param game_id The requested ID for the new game
  * @return True to allow normal execution, False to halt processing
  */
-FFI_IMPORT(bool, hookpointMasterServerHandleOperationRequestCreateGame, (HandlerBaseHandle handler, const char *game_id), handler, game_id)
+FFI_IMPORT(uint8_t, hookpointMasterServerHandleOperationRequestCreateGame, (HandlerBaseHandle handler, const char *game_id), handler, game_id)
 
 /**
  * @brief Low-level interceptor for raw ENet messages before handler processing
@@ -236,15 +237,9 @@ FFI_IMPORT(bool, hookpointMasterServerHandleOperationRequestCreateGame, (Handler
  * @param message The deserialized incoming message
  * @return True to allow normal execution, False to drop the message
  */
-FFI_IMPORT(bool, hookpointHandlerBaseHandleENetCommandOnMessage, (HandlerBaseHandle handler, SerMessageHandle message), handler, message)
+FFI_IMPORT(uint8_t, hookpointHandlerBaseHandleENetCommandOnMessage, (HandlerBaseHandle handler, SerMessageHandle message), handler, message)
 
-/**
- * @brief Intercepts the loading of application settings
- * @param app Pointer to the application instance
- * @param out_success Out parameter indicating if the loading succeeded
- * @return True to allow normal loading, False to bypass native loading
- */
-FFI_IMPORT(bool, hookpointAppLoadAppSettings, (void *app, bool *out_success), app, out_success)
+FFI_IMPORT_PAD(hookpointAppLoadAppSettings)
 #else
 /* --- HOOKPOINTS PADDING --- */
 FFI_IMPORT_PAD(hookpointMasterServerHandleOperationRequestJoinGame)
