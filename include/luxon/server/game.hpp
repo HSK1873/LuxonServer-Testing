@@ -7,6 +7,7 @@
 #include "apps.hpp"
 #include "lobby.hpp"
 #include "peer.hpp"
+#include "coro_support.hpp"
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
 #include "game_plugin_base.hpp"
 #endif
@@ -253,15 +254,16 @@ struct Game : std::enable_shared_from_this<Game> {
 
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
     template <typename InfoStruct>
-    game_plugins::Result execute_plugin_chain(game_plugins::Result (game_plugins::PluginBase::*method)(luxon::ser::OperationRequestMessage&, InfoStruct&),
-                                              luxon::ser::OperationRequestMessage& req, InfoStruct& info) {
+    Awaitable<game_plugins::Result>
+    execute_plugin_chain(Awaitable<game_plugins::Result> (game_plugins::PluginBase::*method)(luxon::ser::OperationRequestMessage&, InfoStruct&),
+                         luxon::ser::OperationRequestMessage& req, InfoStruct& info) {
         for (const auto& plugin : plugins) {
-            game_plugins::Result result = ((*plugin).*method)(req, info);
+            game_plugins::Result result = lco_await((*plugin).*method)(req, info);
             if (result != game_plugins::Result::Continue)
-                return result;
+                lco_return result;
         }
 
-        return game_plugins::Result::Continue;
+        lco_return game_plugins::Result::Continue;
     }
 
     template <typename InfoStruct>

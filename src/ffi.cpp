@@ -139,16 +139,18 @@ public:
                 req = *new_req;
     }
 
-    void OnAttach() override {
+    server::Awaitable<> OnAttach() override {
 #if defined(FFI_WASM) || defined(__wasm__)
         gamePluginOnAttach(plugin_id_, wrap<GameHandle>(game_));
 #else
         if (g_imports.gamePluginOnAttach)
             g_imports.gamePluginOnAttach(plugin_id_, wrap<GameHandle>(game_));
 #endif
+        lco_return;
     }
 
-    server::game_plugins::Result OnCreateGame(luxon::ser::OperationRequestMessage& req, server::game_plugins::OnCreateGameCallInfo& info) override {
+    server::Awaitable<server::game_plugins::Result> OnCreateGame(luxon::ser::OperationRequestMessage& req,
+                                                                 server::game_plugins::OnCreateGameCallInfo& info) override {
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -160,10 +162,11 @@ public:
                                                    info.is_join, info.create_if_not_exist);
 #endif
         update_req_from_updated_msg(req, msg_ref);
-        return static_cast<server::game_plugins::Result>(res);
+        lco_return static_cast<server::game_plugins::Result>(res);
     }
 
-    server::game_plugins::Result BeforeJoin(luxon::ser::OperationRequestMessage& req, server::game_plugins::BeforeJoinGameCallInfo& info) override {
+    server::Awaitable<server::game_plugins::Result> BeforeJoin(luxon::ser::OperationRequestMessage& req,
+                                                               server::game_plugins::BeforeJoinGameCallInfo& info) override {
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -173,10 +176,11 @@ public:
             res = g_imports.gamePluginBeforeJoin(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<PeerHandle>(info.joiner.get()));
 #endif
         update_req_from_updated_msg(req, msg_ref);
-        return static_cast<server::game_plugins::Result>(res);
+        lco_return static_cast<server::game_plugins::Result>(res);
     }
 
-    server::game_plugins::Result OnJoinGame(luxon::ser::OperationRequestMessage& req, server::game_plugins::OnJoinGameCallInfo& info) override {
+    server::Awaitable<server::game_plugins::Result> OnJoinGame(luxon::ser::OperationRequestMessage& req,
+                                                               server::game_plugins::OnJoinGameCallInfo& info) override {
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -186,10 +190,11 @@ public:
             res = g_imports.gamePluginOnJoinGame(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.joiner));
 #endif
         update_req_from_updated_msg(req, msg_ref);
-        return static_cast<server::game_plugins::Result>(res);
+        lco_return static_cast<server::game_plugins::Result>(res);
     }
 
-    server::game_plugins::Result OnLeave(luxon::ser::OperationRequestMessage& req, server::game_plugins::OnLeaveGameCallInfo& info) override {
+    server::Awaitable<server::game_plugins::Result> OnLeave(luxon::ser::OperationRequestMessage& req,
+                                                            server::game_plugins::OnLeaveGameCallInfo& info) override {
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -199,10 +204,11 @@ public:
             res = g_imports.gamePluginOnLeave(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.leaver));
 #endif
         update_req_from_updated_msg(req, msg_ref);
-        return static_cast<server::game_plugins::Result>(res);
+        lco_return static_cast<server::game_plugins::Result>(res);
     }
 
-    server::game_plugins::Result OnRaiseEvent(luxon::ser::OperationRequestMessage& req, server::game_plugins::OnRaiseEventCallInfo& info) override {
+    server::Awaitable<server::game_plugins::Result> OnRaiseEvent(luxon::ser::OperationRequestMessage& req,
+                                                                 server::game_plugins::OnRaiseEventCallInfo& info) override {
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -214,11 +220,11 @@ public:
                                                    wrap<EventHandle>(&info.event), info.cache_op);
 #endif
         update_req_from_updated_msg(req, msg_ref);
-        return static_cast<server::game_plugins::Result>(res);
+        lco_return static_cast<server::game_plugins::Result>(res);
     }
 
-    server::game_plugins::Result BeforeSetProperties(luxon::ser::OperationRequestMessage& req,
-                                                     server::game_plugins::BeforeSetPropertiesCallInfo& info) override {
+    server::Awaitable<server::game_plugins::Result> BeforeSetProperties(luxon::ser::OperationRequestMessage& req,
+                                                                        server::game_plugins::BeforeSetPropertiesCallInfo& info) override {
         uint8_t res = 0;
         luxon::ser::Value up_val(info.update);
         luxon::ser::Value exp_val(info.expected);
@@ -233,10 +239,11 @@ public:
                                                           wrap<SerValueHandle>(&up_val), wrap<SerValueHandle>(&exp_val));
 #endif
         update_req_from_updated_msg(req, msg_ref);
-        return static_cast<server::game_plugins::Result>(res);
+        lco_return static_cast<server::game_plugins::Result>(res);
     }
 
-    server::game_plugins::Result OnSetProperties(luxon::ser::OperationRequestMessage& req, server::game_plugins::OnSetPropertiesCallInfo& info) override {
+    server::Awaitable<server::game_plugins::Result> OnSetProperties(luxon::ser::OperationRequestMessage& req,
+                                                                    server::game_plugins::OnSetPropertiesCallInfo& info) override {
         uint8_t res = 0;
         luxon::ser::Value up_val(info.update);
         luxon::ser::Value exp_val(info.expected);
@@ -250,7 +257,7 @@ public:
                                                       info.broadcast, info.target_actor_id, wrap<SerValueHandle>(&up_val), wrap<SerValueHandle>(&exp_val));
 #endif
         update_req_from_updated_msg(req, msg_ref);
-        return static_cast<server::game_plugins::Result>(res);
+        lco_return static_cast<server::game_plugins::Result>(res);
     }
 
     server::game_plugins::Result BeforeCloseGame(server::game_plugins::BeforeCloseGameCallInfo& info) override {

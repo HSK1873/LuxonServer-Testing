@@ -59,7 +59,7 @@ Awaitable<> GameServerHandler::HandleDisconnect() {
                 GAME_PLUGINS_INVOKE(lco_return, {
                     OnLeaveGameCallInfo info{.leaver = game_peer_};
                     ser::OperationRequestMessage req{.operation_code = OpCodes::Lite::Leave};
-                    game->execute_plugin_chain(&PluginBase::OnLeave, req, info);
+                    lco_await game->execute_plugin_chain(&PluginBase::OnLeave, req, info);
                 });
             }
 
@@ -209,7 +209,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
             // Call into plugins
             GAME_PLUGINS_INVOKE(lco_return, {
                 OnRaiseEventCallInfo info{.raiser = game_peer_, .event = event, .cache_op = cache_op};
-                const Result res = game->execute_plugin_chain(&PluginBase::OnRaiseEvent, req, info);
+                const Result res = lco_await game->execute_plugin_chain(&PluginBase::OnRaiseEvent, req, info);
 
                 if (res == Result::Cancel)
                     lco_return;
@@ -348,7 +348,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
                             continue;
                         }
 
-                        current_game_->plugins.emplace_back(std::move(plugin))->OnAttach();
+                        lco_await current_game_->plugins.emplace_back(std::move(plugin))->OnAttach();
 #else
                 peer_->log->warn("Attempting to load game plugin when plugins are disabled: {}", plugin_name);
 #endif
@@ -375,10 +375,10 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
                     OnCreateGameCallInfo info{.creator = peer_,
                                               .is_join = req.operation_code == OpCodes::Matchmaking::JoinGame,
                                               .create_if_not_exist = static_cast<bool>(params->get<DictKeyCodes::AuthAndLobby::CreateIfNotExists>())};
-                    res = game->execute_plugin_chain(&PluginBase::OnCreateGame, req, info);
+                    res = lco_await game->execute_plugin_chain(&PluginBase::OnCreateGame, req, info);
                 } else {
                     BeforeJoinGameCallInfo info{.joiner = peer_};
-                    res = game->execute_plugin_chain(&PluginBase::BeforeJoin, req, info);
+                    res = lco_await game->execute_plugin_chain(&PluginBase::BeforeJoin, req, info);
                 }
 
                 if (res == Result::Fail) {
@@ -447,7 +447,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
             bool broadcast_actor_props = true;
             GAME_PLUGINS_INVOKE(lco_return, {
                 OnJoinGameCallInfo info{.joiner = &game_peer};
-                const Result res = game->execute_plugin_chain(&PluginBase::OnJoinGame, req, info);
+                const Result res = lco_await game->execute_plugin_chain(&PluginBase::OnJoinGame, req, info);
 
                 if (res == Result::Fail) {
                     peer_->log->info("Reverting join", game->id);
@@ -515,7 +515,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
             // Call into plugins
             GAME_PLUGINS_INVOKE(lco_return, {
                 OnLeaveGameCallInfo info{.leaver = game_peer_};
-                const Result res = game->execute_plugin_chain(&PluginBase::OnLeave, req, info);
+                const Result res = lco_await game->execute_plugin_chain(&PluginBase::OnLeave, req, info);
 
                 if (res == Result::Fail) {
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Lite::Leave, .return_code = ErrorCodes::Matchmaking::PluginReportedError};
@@ -561,7 +561,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
             GAME_PLUGINS_INVOKE(lco_return, {
                 BeforeSetPropertiesCallInfo info{
                     .setter = game_peer_, .broadcast = broadcast, .target_actor_id = actor_id, .update = props, .expected = props_expected};
-                const Result res = game->execute_plugin_chain(&PluginBase::BeforeSetProperties, req, info);
+                const Result res = lco_await game->execute_plugin_chain(&PluginBase::BeforeSetProperties, req, info);
 
                 if (res == Result::Fail) {
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Lite::SetProperties,
@@ -608,7 +608,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
             GAME_PLUGINS_INVOKE(lco_return, {
                 OnSetPropertiesCallInfo info{
                     .setter = game_peer_, .broadcast = broadcast, .target_actor_id = actor_id, .update = props, .expected = props_expected};
-                const Result res = game->execute_plugin_chain(&PluginBase::OnSetProperties, req, info);
+                const Result res = lco_await game->execute_plugin_chain(&PluginBase::OnSetProperties, req, info);
 
                 if (res == Result::Fail)
                     peer_->log->error("Plugin reported error for SetProperties after properties were already set");
