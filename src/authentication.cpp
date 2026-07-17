@@ -149,8 +149,8 @@ Awaitable<ser::OperationResponseMessage> authenticate(ServerManager& server_mana
             std::string plugin_context = auth_provider_opt->auth_url.value_or("");
 
             // Attempt to dispatch custom authentication via registered plugins
-            if (auto plugin_res = auth_plugins::registry::call(server_manager, auth_type, *uid, auth_params, plugin_context, auth_provider_opt->secret,
-                                                               auth_provider_opt->auth_url)) {
+            if (auto plugin_res = lco_await auth_plugins::registry::call(server_manager, auth_type, *uid, auth_params, plugin_context,
+                                                                         auth_provider_opt->secret, auth_provider_opt->auth_url)) {
                 if (plugin_res->has_value()) {
                     p->user_id = plugin_res->value();
                 } else {

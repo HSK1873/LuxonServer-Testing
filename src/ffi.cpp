@@ -420,9 +420,9 @@ void luxonSetServerImports(const LuxonServerImports *imports) {
  * ============================================================================ */
 
 template <unsigned Type>
-static server::auth_plugins::registry::AuthResult auth_callback_thunk(server::ServerManager&, const std::string& requested_user_id, const std::string& params,
-                                                                      const std::string& data, const std::optional<std::string>& secret,
-                                                                      const std::optional<std::string>& auth_url) {
+static server::Awaitable<server::auth_plugins::registry::AuthResult>
+auth_callback_thunk(server::ServerManager&, const std::string& requested_user_id, const std::string& params, const std::string& data,
+                    const std::optional<std::string>& secret, const std::optional<std::string>& auth_url) {
     char out_user_id[256];
     out_user_id[0] = '\0';
     luxon::ser::Message err_msg{luxon::ser::OperationResponseMessage{}};
@@ -439,17 +439,16 @@ static server::auth_plugins::registry::AuthResult auth_callback_thunk(server::Se
         success = g_imports.authPluginOnAuthenticate(Type, requested_user_id.c_str(), params.c_str(), data.c_str(), c_secret, c_auth_url, out_user_id,
                                                      sizeof(out_user_id), wrap<SerMessageHandle>(&err_msg));
     } else {
-        return std::unexpected(luxon::ser::OperationResponseMessage{});
+        lco_return std::unexpected(luxon::ser::OperationResponseMessage{});
     }
 #endif
 
     if (success) {
-        return std::string(out_user_id);
+        lco_return std::string(out_user_id);
     } else {
-        if (auto *resp = err_msg.get_if<luxon::ser::OperationResponseMessage>()) {
-            return std::unexpected(*resp);
-        }
-        return std::unexpected(luxon::ser::OperationResponseMessage{});
+        if (auto *resp = err_msg.get_if<luxon::ser::OperationResponseMessage>())
+            lco_return std::unexpected(*resp);
+        lco_return std::unexpected(luxon::ser::OperationResponseMessage{});
     }
 }
 

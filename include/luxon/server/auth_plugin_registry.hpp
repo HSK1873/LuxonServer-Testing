@@ -4,6 +4,7 @@
 #pragma once
 
 #include "global.hpp"
+#include "coro_support.hpp"
 
 #include <string>
 #include <expected>
@@ -16,12 +17,12 @@ class ServerManager;
 namespace auth_plugins {
 namespace registry {
 using AuthResult = std::expected<std::string, ser::OperationResponseMessage>;
-using AuthCallback = AuthResult (*)(ServerManager&, const std::string& requested_user_id, const std::string& params, const std::string& data,
-                                    const std::optional<std::string>& secret, const std::optional<std::string>& auth_url);
+using AuthCallback = Awaitable<AuthResult> (*)(ServerManager&, const std::string& requested_user_id, const std::string& params, const std::string& data,
+                                               const std::optional<std::string>& secret, const std::optional<std::string>& auth_url);
 
 bool register_(unsigned type, AuthCallback callback);
-std::optional<AuthResult> call(ServerManager&, unsigned type, const std::string& requested_user_id, const std::string& params, const std::string& data,
-                               const std::optional<std::string>& secret, const std::optional<std::string>& auth_url);
+Awaitable<std::optional<AuthResult>> call(ServerManager&, unsigned type, const std::string& requested_user_id, const std::string& params,
+                                          const std::string& data, const std::optional<std::string>& secret, const std::optional<std::string>& auth_url);
 } // namespace registry
 } // namespace auth_plugins
 } // namespace server
