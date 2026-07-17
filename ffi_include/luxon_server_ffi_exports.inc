@@ -49,7 +49,7 @@ FFI_FUNCTION(void, luxonClearLastError, (), )
 
 /* --- COROUTINES INTERFACE --- */
 
-/** @brief Gets handle of the currently active coroutine */
+/** @brief Gets handle of the top coroutine. always call as early as possible! */
 FFI_FUNCTION(CoroutineHandle, luxonGetActiveCoroutine, (), )
 /** @brief Resumes a given coroutine */
 FFI_FUNCTION(void, luxonResumeCoroutine, (CoroutineHandle handle, uint8_t result), handle, result)
