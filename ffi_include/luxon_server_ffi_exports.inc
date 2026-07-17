@@ -50,11 +50,11 @@ FFI_FUNCTION(void, luxonClearLastError, (), )
 /* --- COROUTINES INTERFACE --- */
 
 /** @brief Gets handle of the currently active coroutine */
-CoroutineHandle luxonGetActiveCoroutine();
+FFI_FUNCTION(CoroutineHandle, luxonGetActiveCoroutine, (), )
 /** @brief Resumes a given coroutine */
-void luxonResumeCoroutine(CoroutineHandle handle, uint8_t result);
+FFI_FUNCTION(void, luxonResumeCoroutine, (CoroutineHandle handle, uint8_t result), handle, result)
 /** @brief Destroys a given coroutine, avoid! */
-void luxonDestroyCoroutine(CoroutineHandle handle);
+FFI_FUNCTION(void, luxonDestroyCoroutine, (CoroutineHandle handle), handle)
 
 /* --- BYTE ARRAY INTERFACE --- */
 
