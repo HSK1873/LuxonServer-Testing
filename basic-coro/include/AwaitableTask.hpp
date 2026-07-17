@@ -148,9 +148,7 @@ TaskBase<Promise>::~TaskBase()
 
 }  // namespace detail
 
-template<class T>
-class AwaitableTask : public detail::TaskBase<detail::AwaitablePromise<T>>
-{
+template <class T> class [[nodiscard]] AwaitableTask : public detail::TaskBase<detail::AwaitablePromise<T>> {
     using Base = detail::TaskBase<detail::AwaitablePromise<T>>;
 
 public:

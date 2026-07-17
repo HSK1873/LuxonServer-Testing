@@ -6,6 +6,7 @@
 #include "global.hpp"
 #include "handler_base.hpp"
 #include "peer_persistence.hpp"
+#include "coro_support.hpp"
 
 #include <luxon/ser_types.hpp>
 
@@ -17,8 +18,8 @@ class GameServerHandler : public HandlerBase {
 public:   
     using HandlerBase::HandlerBase;
 
-    void HandleDisconnect() override;
-    void HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) override;
+    Awaitable<> HandleDisconnect() override;
+    Awaitable<> HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) override;
 
     const std::shared_ptr<Game>& get_current_game() const { return current_game_; }
 

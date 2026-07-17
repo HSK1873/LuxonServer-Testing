@@ -24,13 +24,12 @@
 #include <luxon/enet_peer.hpp>
 
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
-#define GAME_PLUGINS_INVOKE(...)                                                                                                                               \
+#define GAME_PLUGINS_INVOKE(returner, ...)                                                                                                                     \
     {                                                                                                                                                          \
         using namespace game_plugins;                                                                                                                          \
         __VA_ARGS__                                                                                                                                            \
     }                                                                                                                                                          \
-    if (get_server_manager().should_abort_active_command())                                                                                                    \
-    return
+    if (get_server_manager().should_abort_active_command())
 #else
 #define GAME_PLUGINS_INVOKE(...)
 #endif

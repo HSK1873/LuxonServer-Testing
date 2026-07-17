@@ -12,6 +12,7 @@
 #include "hookpoints.hpp"
 #include "sock_selector.hpp"
 #include "game.hpp"
+#include "coro_support.hpp"
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 #include "ipc.hpp"
 #endif
@@ -237,9 +238,9 @@ private:
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
-    void process_child_ipc_message(IPC& sender, const luxon::ser::Message& msg);
-    void process_parent_ipc_message(IPC& sender, const luxon::ser::Message& msg);
-    void process_ipc_event(const ser::EventMessage& event_msg);
+    Awaitable<void> process_child_ipc_message(IPC& sender, const luxon::ser::Message& msg);
+    Awaitable<void> process_parent_ipc_message(IPC& sender, const luxon::ser::Message& msg);
+    Awaitable<void> process_ipc_event(const ser::EventMessage& event_msg);
 #endif
 
     void run_scheduled_tasks();
@@ -319,7 +320,13 @@ public:
     /// \param info Identifying information for the target application
     /// \return Shared pointer to the application
     ///
-    std::shared_ptr<App> get_app(const AppInfo& info);
+    Awaitable<std::shared_ptr<App>> get_app(const AppInfo& info);
+    ///
+    /// \brief Retrieves an application instance based on the provided info if it already exists
+    /// \param info Identifying information for the target application
+    /// \return Shared pointer to the application
+    ///
+    std::shared_ptr<App> try_get_app(const AppInfo& info);
 
     ///
     /// \brief Retrieves a lobby instance within a specific application
@@ -333,7 +340,13 @@ public:
     /// \param info Identifying information for the target lobby
     /// \return Shared pointer to the lobby
     ///
-    std::shared_ptr<Lobby> get_lobby(const LobbyInfo& info) { return get_lobby(*get_app(info.app), info); }
+    Awaitable<std::shared_ptr<Lobby>> get_lobby(const LobbyInfo& info) { lco_return get_lobby(*lco_await get_app(info.app), info); }
+    ///
+    /// \brief Retrieves a lobby instance
+    /// \param info Identifying information for the target lobby if app already exists
+    /// \return Shared pointer to the lobby
+    ///
+    std::shared_ptr<Lobby> try_get_lobby(const LobbyInfo& info) { return get_lobby(*try_get_app(info.app), info); }
 
     ///
     /// \brief Retrieves a game instance within a specific lobby
@@ -354,7 +367,13 @@ public:
     /// \param info Identifying information for the target game
     /// \return Expected containing a shared pointer to the game on success, or an error message string on failure
     ///
-    std::expected<std::shared_ptr<Game>, std::string> get_game(const GameInfo& info) { return get_game(*get_lobby(info.lobby), info); }
+    Awaitable<std::expected<std::shared_ptr<Game>, std::string>> get_game(const GameInfo& info) { lco_return get_game(*lco_await get_lobby(info.lobby), info); }
+    ///
+    /// \brief Retrieves a game instance
+    /// \param info Identifying information for the target game if app already exists
+    /// \return Expected containing a shared pointer to the game on success, or an error message string on failure
+    ///
+    std::expected<std::shared_ptr<Game>, std::string> try_get_game(const GameInfo& info) { return get_game(*try_get_lobby(info.lobby), info); }
 
     bool is_game_external(Game& game) const {
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING

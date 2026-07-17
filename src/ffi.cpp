@@ -11,6 +11,7 @@
 #include "luxon/server/lobby.hpp"
 #include "luxon/server/peer.hpp"
 #include "luxon/server/logger.hpp"
+#include "luxon/server/coro_support.hpp"
 #include "luxon/ser_ipc_binary.hpp"
 #include "luxon/ser_types.hpp"
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
@@ -1806,39 +1807,41 @@ void registerHookpoints(ServerManagerHandle manager) {
         if (!m)
             return;
 
+        using server::Awaitable;
+
         m->hookpoints.MasterServer_HandleOperationRequest_JoinGame = [](server::MasterServerHandler& handler, const std::string& game_id,
-                                                                        bool is_join) -> bool {
+                                                                        bool is_join) -> Awaitable<bool> {
 #if defined(FFI_WASM) || defined(__wasm__)
-            return hookpointMasterServerHandleOperationRequestJoinGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str(), is_join);
+            lco_return hookpointMasterServerHandleOperationRequestJoinGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str(), is_join);
 #else
             if (g_imports.hookpointMasterServerHandleOperationRequestJoinGame)
-                return g_imports.hookpointMasterServerHandleOperationRequestJoinGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str(), is_join);
-            return false;
+                lco_return g_imports.hookpointMasterServerHandleOperationRequestJoinGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str(), is_join);
+            lco_return false;
 #endif
         };
 
-        m->hookpoints.MasterServer_HandleOperationRequest_CreateGame = [](server::MasterServerHandler& handler, const std::string& game_id) -> bool {
+        m->hookpoints.MasterServer_HandleOperationRequest_CreateGame = [](server::MasterServerHandler& handler, const std::string& game_id) -> Awaitable<bool> {
 #if defined(FFI_WASM) || defined(__wasm__)
-            return hookpointMasterServerHandleOperationRequestCreateGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str());
+            lco_return hookpointMasterServerHandleOperationRequestCreateGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str());
 #else
             if (g_imports.hookpointMasterServerHandleOperationRequestCreateGame)
-                return g_imports.hookpointMasterServerHandleOperationRequestCreateGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str());
-            return false;
+                lco_return g_imports.hookpointMasterServerHandleOperationRequestCreateGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str());
+            lco_return false;
 #endif
         };
 
         m->hookpoints.HandlerBase_HandleENetCommand_OnMessage = [](server::HandlerBase& handler, luxon::ser::Message& message,
-                                                                   luxon::enet::EnetCommandHeader& /*header*/) -> bool {
+                                                                   luxon::enet::EnetCommandHeader& /*header*/) -> Awaitable<bool> {
 #if defined(FFI_WASM) || defined(__wasm__)
-            return hookpointHandlerBaseHandleENetCommandOnMessage(wrap<HandlerBaseHandle>(&handler), wrap<SerMessageHandle>(&message));
+            lco_return hookpointHandlerBaseHandleENetCommandOnMessage(wrap<HandlerBaseHandle>(&handler), wrap<SerMessageHandle>(&message));
 #else
             if (g_imports.hookpointHandlerBaseHandleENetCommandOnMessage)
-                return g_imports.hookpointHandlerBaseHandleENetCommandOnMessage(wrap<HandlerBaseHandle>(&handler), wrap<SerMessageHandle>(&message));
-            return false;
+                lco_return g_imports.hookpointHandlerBaseHandleENetCommandOnMessage(wrap<HandlerBaseHandle>(&handler), wrap<SerMessageHandle>(&message));
+            lco_return false;
 #endif
         };
 
-        m->hookpoints.App_load_app_settings = [](server::App& app, server::AppSettings& /*settings*/, bool& success) -> bool {
+        m->hookpoints.App_load_app_settings = [](server::App& app, server::AppSettings& /*settings*/, bool& success) -> Awaitable<bool> {
             bool out_success = false;
             bool handled = false;
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -1849,7 +1852,7 @@ void registerHookpoints(ServerManagerHandle manager) {
 #endif
             if (handled)
                 success = out_success;
-            return handled;
+            lco_return handled;
         };
     });
 #endif

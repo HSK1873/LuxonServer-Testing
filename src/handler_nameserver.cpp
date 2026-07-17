@@ -12,11 +12,11 @@
 #include <tracy/Tracy.hpp>
 
 namespace server {
-void NameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) {
+Awaitable<> NameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) {
     ZoneScoped;
 
     if (cmd_header.channel_id != 0)
-        return HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
+        lco_return lco_await HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
 
     if (!peer_->is_authenticated()) {
         switch (req.operation_code) {
@@ -26,7 +26,7 @@ void NameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             ZoneScopedN("HandleOperationRequest_Authenticate");
 
             // Try to authenticate
-            auto resp = authenticate(server_manager_, *peer_, req, cmd_header);
+            auto resp = lco_await authenticate(server_manager_, *peer_, req, cmd_header);
 
             // Add details if authentication was successful
             if (resp.return_code == ErrorCodes::Core::Ok) {
@@ -42,7 +42,7 @@ void NameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             if (!peer_->is_authenticated())
                 peer_->disconnect();
 
-            return;
+            lco_return;
         }
 
         case OpCodes::RpcAndMisc::GetRegions: {
@@ -61,11 +61,11 @@ void NameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             resp.parameters[DictKeyCodes::LoadBalancing::Address] = std::move(addresses);
 
             send(proto_->Serialize(resp));
-            return;
+            lco_return;
         }
         }
     }
 
-    return HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
+    lco_return lco_await HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
 }
 } // namespace server

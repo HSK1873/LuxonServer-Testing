@@ -4,6 +4,7 @@
 #pragma once
 
 #include "lobby.hpp"
+#include "coro_support.hpp"
 
 #include <string>
 #include <string_view>
@@ -68,7 +69,7 @@ public:
     ServerManager& server_manager;
     const std::string_view id, version;
 
-    bool load_app_settings();
+    Awaitable<bool> load_app_settings();
 
     size_t get_game_count() const;
     size_t get_peer_count() const;
@@ -80,9 +81,10 @@ public:
     std::shared_ptr<Lobby> get_lobby(LobbyId id = {});
     const std::unordered_map<LobbyId, std::weak_ptr<Lobby>, LobbyIdHash>& get_lobbies() const { return lobbies_; }
 
-    std::shared_ptr<App> get_shared() { return get(server_manager, std::string(id), std::string(version)); }
+    std::shared_ptr<App> get_shared() { return try_get(server_manager, std::string(id), std::string(version)); }
 
-    static std::shared_ptr<App> get(ServerManager& server_manager, const std::string& id, const std::string& version);
+    static std::shared_ptr<App> try_get(ServerManager& server_manager, const std::string& id, const std::string& version);
+    static Awaitable<std::shared_ptr<App>> get(ServerManager& server_manager, const std::string& id, const std::string& version);
     static std::vector<std::shared_ptr<App>> get_all(ServerManager& server_manager);
     static AppInfo decode_app_info(const ser::ParameterList& params);
 };

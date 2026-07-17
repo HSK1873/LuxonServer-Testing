@@ -44,7 +44,7 @@ using SetProperties =
 using ChangeInterestGroups = Model<Parameter<ser::ByteArray, RoutingAndEvents::Add, true>, Parameter<ser::ByteArray, RoutingAndEvents::Remove, true>>;
 } // namespace models
 
-void GameServerHandler::HandleDisconnect() {
+Awaitable<> GameServerHandler::HandleDisconnect() {
     ZoneScoped;
 
     if (auto& game = current_game_) {
@@ -56,7 +56,7 @@ void GameServerHandler::HandleDisconnect() {
 
             if (!has_left_) {
                 // Call into plugins
-                GAME_PLUGINS_INVOKE({
+                GAME_PLUGINS_INVOKE(lco_return, {
                     OnLeaveGameCallInfo info{.leaver = game_peer_};
                     ser::OperationRequestMessage req{.operation_code = OpCodes::Lite::Leave};
                     game->execute_plugin_chain(&PluginBase::OnLeave, req, info);
@@ -88,10 +88,10 @@ void GameServerHandler::HandleDisconnect() {
         game.reset();
     }
 
-    HandlerBase::HandleDisconnect();
+    lco_await HandlerBase::HandleDisconnect();
 }
 
-void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) {
+Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) {
     ZoneScoped;
 
     const auto ensure_is_master = [&]() {
@@ -116,7 +116,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
 
     if (!peer_->is_authenticated()) {
         if (cmd_header.channel_id != 0)
-            return HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
+            lco_return lco_await HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
 
         switch (req.operation_code) {
 
@@ -125,7 +125,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             ZoneScopedN("HandleOperationRequest_Authenticate");
 
             // Try to authenticate
-            auto resp = authenticate(server_manager_, *peer_, req, cmd_header, false);
+            auto resp = lco_await authenticate(server_manager_, *peer_, req, cmd_header, false);
 
             // Add position parameter if authentication was successful
             if (resp.return_code == ErrorCodes::Core::Ok)
@@ -133,7 +133,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Send response
             send(proto_->Serialize(resp, is_encrypted));
@@ -141,12 +141,12 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             // Disconnect on error
             if (!peer_->is_authenticated()) {
                 peer_->disconnect();
-                return;
+                lco_return;
             }
 
             // Set current game
             auto& pp = *peer_->persistent;
-            auto expected_game = server_manager_.get_game(pp.get_invitation());
+            auto expected_game = lco_await server_manager_.get_game(pp.get_invitation());
             pp.reset_game(); // Effectively expire peer's game invitation and memory ownership
             if (expected_game) {
                 if (server_manager_.is_game_external(**expected_game)) {
@@ -156,7 +156,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                                                              .debug_message = "Not invited to server"};
                     send(proto_->Serialize(resp), enet::EnetSendOptions{.channel = cmd_header.channel_id});
                     peer_->disconnect();
-                    return;
+                    lco_return;
                 } else {
                     current_game_ = std::move(*expected_game);
                 }
@@ -167,10 +167,10 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                                                          .debug_message = "Not invited to any game server"};
                 send(proto_->Serialize(resp), enet::EnetSendOptions{.channel = cmd_header.channel_id});
                 peer_->disconnect();
-                return;
+                lco_return;
             }
 
-            return;
+            lco_return;
         }
         }
     } else if (auto game = current_game_) {
@@ -182,12 +182,12 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             using DictKeyCodes::GameAndActor::ActorList;
 
             if (!ensure_joined_state())
-                return;
+                lco_return;
 
             const auto params = models::RaiseEvent::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             const auto cache_op = params->get<Cache>();
@@ -207,23 +207,23 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                 event.receivers = params->get<DictKeyCodes::RoutingAndEvents::ReceiverGroup>();
 
             // Call into plugins
-            GAME_PLUGINS_INVOKE({
+            GAME_PLUGINS_INVOKE(lco_return, {
                 OnRaiseEventCallInfo info{.raiser = game_peer_, .event = event, .cache_op = cache_op};
                 const Result res = game->execute_plugin_chain(&PluginBase::OnRaiseEvent, req, info);
 
                 if (res == Result::Cancel)
-                    return;
+                    lco_return;
                 if (res == Result::Fail) {
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Lite::RaiseEvent,
                                                              .return_code = ErrorCodes::Matchmaking::PluginReportedError};
                     send(proto_->Serialize(resp), enet::EnetSendOptions{.channel = cmd_header.channel_id});
-                    return;
+                    lco_return;
                 }
             });
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Make sure client isn't attempting to raise a Photon event
             if (event.code > 220) {
@@ -231,7 +231,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                                                          .return_code = ErrorCodes::Core::OperationInvalid,
                                                          .debug_message = "Not allowed to raise Photon events (codes higher than 220)"};
                 send(proto_->Serialize(resp), enet::EnetSendOptions{.channel = cmd_header.channel_id});
-                return;
+                lco_return;
             }
 
             // RemoveFromRoomCache
@@ -274,7 +274,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
 
                     return true;
                 });
-                return; // Do NOT broadcast removal
+                lco_return; // Do NOT broadcast removal
             }
 
             // RemoveFromCacheForActorsLeft
@@ -282,7 +282,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                 game->event_cache.remove_if([&](const Event& cached_event) {
                     return game->find_peer(cached_event.sender_actor_id) == nullptr && cached_event.sender_actor_id != 0; // Don't remove global
                 });
-                return;
+                lco_return;
             }
 
             // Add To Cache
@@ -301,11 +301,11 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
 
             // Broadcast
             game->broadcast_event(event);
-            return;
+            lco_return;
         }
 
         if (cmd_header.channel_id != 0)
-            return HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
+            lco_return lco_await HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
 
         switch (req.operation_code) {
 
@@ -315,12 +315,12 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
 
             // Common validation
             if (!ensure_joined_state(false))
-                return;
+                lco_return;
 
             const auto params = models::JoinOrCreateGame::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             const bool is_master = game->peers.empty();
@@ -331,7 +331,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                                                          .return_code = ErrorCodes::Matchmaking::GameIdNotExists,
                                                          .debug_message = "Token not valid for this Game ID"};
                 send(proto_->Serialize(resp));
-                return;
+                lco_return;
             }
 
             if (is_master) {
@@ -362,12 +362,12 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                                                              .return_code = join_validation_code,
                                                              .debug_message = std::string(join_validation_message)};
                     send(proto_->Serialize(resp));
-                    return;
+                    lco_return;
                 }
             }
 
             // Call into plugins
-            GAME_PLUGINS_INVOKE({
+            GAME_PLUGINS_INVOKE(lco_return, {
                 auto& game = current_game_;
                 Result res;
 
@@ -384,14 +384,14 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                 if (res == Result::Fail) {
                     const ser::OperationResponseMessage resp{.operation_code = req.operation_code, .return_code = ErrorCodes::Matchmaking::PluginReportedError};
                     send(proto_->Serialize(resp));
-                    return;
+                    lco_return;
                 }
             });
 
             if (is_master) {
                 // No turning back
                 if (!server_manager_.mark_command_committed())
-                    return;
+                    lco_return;
 
                 // Mark game as created
                 game->is_created = true;
@@ -427,25 +427,25 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             if (!game_peer.is_valid()) {
                 peer_->log->error("Game peer could not be created. Connection must terminate now.");
                 peer_->disconnect();
-                return;
+                lco_return;
             }
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Add peer to game
             game_peer_ = game->add_peer(std::move(game_peer));
             if (!game_peer_) {
                 peer_->log->error("Player could not be added to game. Connection must terminate now.");
                 peer_->disconnect();
-                return;
+                lco_return;
             }
             peer_->log->info("Successfully joined game: {}", game->id);
 
             // Call into plugins
             bool broadcast_actor_props = true;
-            GAME_PLUGINS_INVOKE({
+            GAME_PLUGINS_INVOKE(lco_return, {
                 OnJoinGameCallInfo info{.joiner = &game_peer};
                 const Result res = game->execute_plugin_chain(&PluginBase::OnJoinGame, req, info);
 
@@ -456,7 +456,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
 
                     const ser::OperationResponseMessage resp{.operation_code = req.operation_code, .return_code = ErrorCodes::Matchmaking::PluginReportedError};
                     send(proto_->Serialize(resp));
-                    return;
+                    lco_return;
                 }
 
                 if (!info.publish_user_id.value_or(true))
@@ -506,27 +506,27 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             // Flood the client with current state
             game->flood_peer(game_peer_);
 
-            return;
+            lco_return;
         }
 
         case OpCodes::Lite::Leave: {
             ZoneScopedN("HandleOperationRequest_Leave");
 
             // Call into plugins
-            GAME_PLUGINS_INVOKE({
+            GAME_PLUGINS_INVOKE(lco_return, {
                 OnLeaveGameCallInfo info{.leaver = game_peer_};
                 const Result res = game->execute_plugin_chain(&PluginBase::OnLeave, req, info);
 
                 if (res == Result::Fail) {
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Lite::Leave, .return_code = ErrorCodes::Matchmaking::PluginReportedError};
                     send(proto_->Serialize(resp));
-                    return;
+                    lco_return;
                 }
             });
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Send success response
             const ser::OperationResponseMessage resp{.operation_code = OpCodes::Lite::Leave, .return_code = ErrorCodes::Core::Ok};
@@ -536,19 +536,19 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             has_left_ = true;
             peer_->disconnect();
 
-            return;
+            lco_return;
         }
 
         case OpCodes::Lite::SetProperties: {
             ZoneScopedN("HandleOperationRequest_SetProperties");
 
             if (!ensure_joined_state())
-                return;
+                lco_return;
 
             const auto params = models::SetProperties::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             bool broadcast = params->get<DictKeyCodes::RoutingAndEvents::Broadcast>();
@@ -558,7 +558,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             const auto& props_expected = params->get<DictKeyCodes::Properties::ExpectedValues>();
 
             // Call into plugins
-            GAME_PLUGINS_INVOKE({
+            GAME_PLUGINS_INVOKE(lco_return, {
                 BeforeSetPropertiesCallInfo info{
                     .setter = game_peer_, .broadcast = broadcast, .target_actor_id = actor_id, .update = props, .expected = props_expected};
                 const Result res = game->execute_plugin_chain(&PluginBase::BeforeSetProperties, req, info);
@@ -567,7 +567,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Lite::SetProperties,
                                                          .return_code = ErrorCodes::Matchmaking::PluginReportedError};
                     send(proto_->Serialize(resp));
-                    return;
+                    lco_return;
                 }
 
                 broadcast = info.broadcast;
@@ -576,7 +576,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Set actor or game properties
             bool ok = true;
@@ -605,7 +605,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             }
 
             // Call into plugins
-            GAME_PLUGINS_INVOKE({
+            GAME_PLUGINS_INVOKE(lco_return, {
                 OnSetPropertiesCallInfo info{
                     .setter = game_peer_, .broadcast = broadcast, .target_actor_id = actor_id, .update = props, .expected = props_expected};
                 const Result res = game->execute_plugin_chain(&PluginBase::OnSetProperties, req, info);
@@ -614,7 +614,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                     peer_->log->error("Plugin reported error for SetProperties after properties were already set");
             });
 
-            return;
+            lco_return;
         }
 
         case OpCodes::Lite::ChangeInterestGroups: {
@@ -623,11 +623,11 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             const auto params = models::ChangeInterestGroups::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             if (const auto *removes = params->get<DictKeyCodes::RoutingAndEvents::Remove>()) {
                 if (removes->empty()) {
@@ -646,7 +646,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                 }
             }
 
-            return;
+            lco_return;
         }
         }
     } else if (allow_unsolicited_) {
@@ -655,7 +655,7 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
             const auto params = models::JoinOrCreateGame::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             // Find or create game
@@ -672,30 +672,30 @@ void GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& re
                     auto new_game = lobby->create_game(std::string(game_id), "", true);
                     if (!new_game) {
                         send(proto_->Serialize(new_game.error()));
-                        return;
+                        lco_return;
                     }
                     target_game = *new_game;
                 } else {
                     const ser::OperationResponseMessage resp{
                         .operation_code = req.operation_code, .return_code = ErrorCodes::Matchmaking::GameIdNotExists, .debug_message = "Game does not exist"};
                     send(proto_->Serialize(resp));
-                    return;
+                    lco_return;
                 }
             }
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Set as current game and disallow unsolicited join to prevent infinite recursion
             peer_->persistent->invite(std::move(target_game), req.operation_code == OpCodes::Matchmaking::CreateGame);
             allow_unsolicited_ = false;
 
             // Now that invitation is populated it will execute main logic block
-            return HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
+            lco_return lco_await HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
         }
     }
 
-    return HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
+    lco_return lco_await HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
 }
 } // namespace server

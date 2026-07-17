@@ -49,12 +49,18 @@ HandlerBase::~HandlerBase() {
         store_persistent_peer(server_manager_, std::move(peer_->persistent));
 }
 
-void HandlerBase::HandleConnect() { peer_->log->info("Client connected!"); }
-void HandlerBase::HandleDisconnect() { peer_->log->info("Client disconnected!"); }
+Awaitable<> HandlerBase::HandleConnect() {
+    peer_->log->info("Client connected!");
+    lco_return;
+}
+Awaitable<> HandlerBase::HandleDisconnect() {
+    peer_->log->info("Client disconnected!");
+    lco_return;
+}
 
 void HandlerBase::HandleSlowUpdate() {}
 
-void HandlerBase::HandleENetConnectionStateChange(enet::EnetConnectionState state) {
+Awaitable<> HandlerBase::HandleENetConnectionStateChange(enet::EnetConnectionState state) {
     std::string_view state_name;
     switch (state) {
     case enet::EnetConnectionState::Disconnected:
@@ -77,9 +83,11 @@ void HandlerBase::HandleENetConnectionStateChange(enet::EnetConnectionState stat
     }
 
     peer_->log->info("Client is now {}", state_name);
+
+    lco_return;
 }
 
-void HandlerBase::HandleENetCommand(enet::EnetCommand&& cmd) {
+Awaitable<> HandlerBase::HandleENetCommand(enet::EnetCommand&& cmd) {
     ZoneScoped;
 
     const auto payload = cmd.get_payload();
@@ -93,7 +101,7 @@ void HandlerBase::HandleENetCommand(enet::EnetCommand&& cmd) {
     if (!expected_message) {
         // Try to parse as HTTP request
         if (auto expected_request = luxon::parse_raw_http(std::string_view{reinterpret_cast<const char *>(payload.data()), payload.size()})) {
-            HandleHTTPRequest(std::move(*expected_request), cmd.header);
+            lco_await HandleHTTPRequest(std::move(*expected_request), cmd.header);
         } else {
             // We don't know what this is!
             peer_->log->warn("Invalid packet ({} bytes in length) received: {}", payload.size(), expected_message.error().message);
@@ -102,7 +110,7 @@ void HandlerBase::HandleENetCommand(enet::EnetCommand&& cmd) {
 #endif
         }
 
-        return;
+        lco_return;
     }
 
     ser::Message& message = *expected_message;
@@ -111,18 +119,20 @@ void HandlerBase::HandleENetCommand(enet::EnetCommand&& cmd) {
     LUXON_SERVER_HOOKPOINT(HandlerBase_HandleENetCommand_OnMessage, message, cmd.header);
 
     if (auto *req = message.get_if<ser::InitMessage>())
-        return HandleInitRequest(std::move(*req), cmd.header);
+        lco_return lco_await HandleInitRequest(std::move(*req), cmd.header);
 
     if (auto *req = message.get_if<ser::OperationRequestMessage>())
-        return HandleOperationRequest(std::move(*req), message.encrypted, cmd.header);
+        lco_return lco_await HandleOperationRequest(std::move(*req), message.encrypted, cmd.header);
 
     if (auto *req = message.get_if<ser::InternalOperationRequestMessage>())
-        return HandleInternalOperationRequest(std::move(*req), message.encrypted, cmd.header);
+        lco_return lco_await HandleInternalOperationRequest(std::move(*req), message.encrypted, cmd.header);
 
     peer_->log->warn("Invalid message type {} received", message.index());
+
+    lco_return;
 }
 
-void HandlerBase::HandleHTTPRequest(HttpRequest&& request, const enet::EnetCommandHeader& cmd_header) {
+Awaitable<> HandlerBase::HandleHTTPRequest(HttpRequest&& request, const enet::EnetCommandHeader& cmd_header) {
     ZoneScoped;
 
     // Check if init request
@@ -158,7 +168,7 @@ void HandlerBase::HandleHTTPRequest(HttpRequest&& request, const enet::EnetComma
             }
 
             // Pass the synthesized init request to our handler
-            HandleInitRequest(std::move(photon_req), cmd_header);
+            lco_await HandleInitRequest(std::move(photon_req), cmd_header);
         }
 
         // Translate to fake authenticate operation request
@@ -168,7 +178,7 @@ void HandlerBase::HandleHTTPRequest(HttpRequest&& request, const enet::EnetComma
 
             ser::OperationRequestMessage photon_req{.operation_code = OpCodes::Auth::AuthenticateOnce};
             photon_req.parameters[DictKeyCodes::LoadBalancing::Token] = token;
-            HandleOperationRequest(std::move(photon_req), false, cmd_header);
+            lco_await HandleOperationRequest(std::move(photon_req), false, cmd_header);
         }
     } else {
         // We don't know what this HTTP request is!
@@ -179,7 +189,7 @@ void HandlerBase::HandleHTTPRequest(HttpRequest&& request, const enet::EnetComma
     }
 }
 
-void HandlerBase::HandleInitRequest(ser::InitMessage&& req, const enet::EnetCommandHeader& cmd_header) {
+Awaitable<> HandlerBase::HandleInitRequest(ser::InitMessage&& req, const enet::EnetCommandHeader& cmd_header) {
     ZoneScoped;
 
     // Try to create new protocol implementation for given version
@@ -187,7 +197,7 @@ void HandlerBase::HandleInitRequest(ser::InitMessage&& req, const enet::EnetComm
 
     // No turning back
     if (!server_manager_.mark_command_committed())
-        return;
+        lco_return;
 
     // Answer init request
     if (protocol) {
@@ -200,23 +210,23 @@ void HandlerBase::HandleInitRequest(ser::InitMessage&& req, const enet::EnetComm
     }
 }
 
-void HandlerBase::HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) {
+Awaitable<> HandlerBase::HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) {
     ZoneScoped;
 
     // Only answer unknown operations on channel 0
     if (cmd_header.channel_id != 0)
-        return;
+        lco_return;
 
     // No turning back
     if (!server_manager_.mark_command_committed())
-        return;
+        lco_return;
 
     // Handle authentication requests that are coming through despite peer already being authenticated
     if (req.operation_code == OpCodes::Auth::Authenticate && peer_->is_authenticated()) {
         const ser::OperationResponseMessage resp{
             .operation_code = req.operation_code, .return_code = ErrorCodes::Core::OperationNotAllowedInCurrentState, .debug_message = "Already authenticated"};
         send(proto_->Serialize(resp));
-        return;
+        lco_return;
     }
 
     const ser::OperationResponseMessage resp{.operation_code = req.operation_code,
@@ -226,15 +236,16 @@ void HandlerBase::HandleOperationRequest(ser::OperationRequestMessage&& req, boo
     peer_->log->warn("Client sent operation request with unknown opcode: {}", req.operation_code);
 }
 
-void HandlerBase::HandleInternalOperationRequest(ser::InternalOperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) {
+Awaitable<> HandlerBase::HandleInternalOperationRequest(ser::InternalOperationRequestMessage&& req, bool is_encrypted,
+                                                        const enet::EnetCommandHeader& cmd_header) {
     ZoneScoped;
 
     if (cmd_header.channel_id != 0)
-        return;
+        lco_return;
 
     // No turning back
     if (!server_manager_.mark_command_committed())
-        return;
+        lco_return;
 
     if (req.operation_code == ICodes::IOpInitEncryption) {
         ZoneScopedN("HandleInternalOperationRequest_IOpInitEncryption");
@@ -243,7 +254,7 @@ void HandlerBase::HandleInternalOperationRequest(ser::InternalOperationRequestMe
         auto expected_response = proto_->HandleInitEncryptionRequest(req);
         if (!expected_response) {
             peer_->log->error("Failed to establish encryption: {}", expected_response.error().message);
-            return;
+            lco_return;
         }
         send(proto_->Serialize(*expected_response));
 

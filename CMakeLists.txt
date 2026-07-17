@@ -149,6 +149,7 @@ add_library(luxon_server_lib
     include/luxon/server/data_model.hpp
     include/luxon/server/pfr_pack.hpp
     include/luxon/server/sqlite3.h src/sqlite3.c
+    include/luxon/server/coro_support.hpp
     src/lobby_vt.hpp src/lobby_vt.cpp
 
     tracy/public/tracy/Tracy.hpp
@@ -252,6 +253,11 @@ endif()
 if (LUXON_SERVER_ENABLE_COMMAND_RESTARTER)
     target_sources(luxon_server_lib PRIVATE include/luxon/server/command_restarter.hpp src/command_restarter.cpp)
     target_compile_definitions(luxon_server_lib PUBLIC LUXON_SERVER_ENABLE_COMMAND_RESTARTER)
+endif()
+
+if (LUXON_SERVER_ENABLE_COROUTINES)
+    target_link_libraries(luxon_server_lib PUBLIC basiccoro)
+    target_compile_definitions(luxon_server_lib PUBLIC LUXON_SERVER_ENABLE_COROUTINES)
 endif()
 
 if (LUXON_SERVER_USE_SPDLOG)

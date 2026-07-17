@@ -5,12 +5,13 @@
 
 #include "global.hpp"
 #include "handler_base.hpp"
+#include "coro_support.hpp"
 
 namespace server {
 class NameServerHandler : public HandlerBase {
 public:
     using HandlerBase::HandlerBase;
 
-    void HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) override;
+    Awaitable<> HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) override;
 };
 } // namespace server

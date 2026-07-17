@@ -44,9 +44,9 @@ void AppSettings::enforce_global_config(ServerManager& server_manager) {
 
 App::App(ServerManager& server_manager, std::string_view id, std::string_view version) : server_manager(server_manager), id(id), version(version) {}
 
-bool App::load_app_settings() {
+Awaitable<bool> App::load_app_settings() {
     // Get settings
-    const bool fres = [this]() {
+    const bool fres = co_await [this]() -> Awaitable<bool> {
         // Try hookpoint
         bool hookpoint_success = true;
         LUXON_SERVER_HOOKPOINT_CSM(server_manager, App_load_app_settings, settings_, hookpoint_success) hookpoint_success;
@@ -57,18 +57,18 @@ bool App::load_app_settings() {
             if (const auto settings = server_manager.settings_manager->get_app_settings(std::string(id)))
                 settings_ = *settings;
             else
-                return false;
+                lco_return false;
         }
 
 #endif
-        return true;
+        lco_return true;
     }();
 
     // Enforce globally configured caps
     if (fres)
         settings_.enforce_global_config(server_manager);
 
-    return fres;
+    lco_return fres;
 }
 
 size_t App::get_game_count() const {
@@ -120,12 +120,24 @@ std::shared_ptr<Lobby> App::get_lobby(LobbyId id) {
     return fres;
 }
 
-std::shared_ptr<App> App::get(ServerManager& server_manager, const std::string& id, const std::string& version) {
+std::shared_ptr<App> App::try_get(ServerManager& server_manager, const std::string& id, const std::string& version) {
+    ZoneScoped;
+    if (auto res = server_manager.apps.find({id, version}); res != server_manager.apps.end()) {
+        if (auto fres = res->second.lock())
+            return fres;
+        else
+            server_manager.apps.erase(res);
+    }
+
+    return nullptr;
+}
+
+Awaitable<std::shared_ptr<App>> App::get(ServerManager& server_manager, const std::string& id, const std::string& version) {
     ZoneScoped;
 
     if (auto res = server_manager.apps.find({id, version}); res != server_manager.apps.end()) {
         if (auto fres = res->second.lock())
-            return fres;
+            lco_return fres;
         else
             server_manager.apps.erase(res);
     }
@@ -139,13 +151,13 @@ std::shared_ptr<App> App::get(ServerManager& server_manager, const std::string& 
     });
 
     if (!fres)
-        return nullptr;
+        lco_return nullptr;
 
-    if (!fres->load_app_settings())
-        return nullptr;
+    if (!lco_await fres->load_app_settings())
+        lco_return nullptr;
 
     res.first->second = fres;
-    return fres;
+    lco_return fres;
 }
 
 std::vector<std::shared_ptr<App>> App::get_all(ServerManager& server_manager) {

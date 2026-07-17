@@ -65,14 +65,14 @@ void MasterServerHandler::HandleSlowUpdate() {
         last_app_stats_.reset();
     }
 
-    HandlerBase::HandleSlowUpdate();
+    return HandlerBase::HandleSlowUpdate();
 }
 
-void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) {
+Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) {
     ZoneScoped;
 
     if (cmd_header.channel_id != 0)
-        return HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
+        lco_return lco_await HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
 
     if (!peer_->is_authenticated()) {
         switch (req.operation_code) {
@@ -84,14 +84,14 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             const auto params = models::ClientSettings::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             // Does the client want lobby stats?
             const bool wants_lobby_stats = params->get<DictKeyCodes::AuthAndLobby::LobbyStats>().value_or(true);
 
             // Try to authenticate
-            auto resp = authenticate(server_manager_, *peer_, req, cmd_header);
+            auto resp = lco_await authenticate(server_manager_, *peer_, req, cmd_header);
 
             // Add details if authentication was successful
             if (resp.return_code == ErrorCodes::Core::Ok)
@@ -99,7 +99,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Send response
             send(proto_->Serialize(resp, is_encrypted));
@@ -107,7 +107,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             // Disconnect on error
             if (!peer_->is_authenticated()) {
                 peer_->disconnect();
-                return;
+                lco_return;
             }
 
             // Handle successful authentication
@@ -120,7 +120,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             if (wants_lobby_stats)
                 send_lobby_stats();
 
-            return;
+            lco_return;
         }
         }
     } else {
@@ -137,12 +137,12 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             auto joined_lobby = get_requested_lobby(req);
             if (!joined_lobby) {
                 send(proto_->Serialize(joined_lobby.error()));
-                return;
+                lco_return;
             }
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Join the lobby
             join_lobby(std::move(*joined_lobby));
@@ -152,7 +152,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
 
             // Send game list
             send_game_list();
-            return;
+            lco_return;
         }
 
         case OpCodes::Lobby::LeaveLobby: {
@@ -160,7 +160,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Try to leave lobby
             std::shared_ptr<Lobby> lobby;
@@ -176,7 +176,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             else
                 resp.debug_message = "Lobby not joined";
             send(proto_->Serialize(resp));
-            return;
+            lco_return;
         }
 
         case OpCodes::Lobby::LobbyStats: {
@@ -185,7 +185,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             const auto params = models::LobbyStats::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             // Get filters
@@ -204,11 +204,11 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Send response
             send(proto_->Serialize(resp));
-            return;
+            lco_return;
         }
 
         case OpCodes::Lobby::GetGameList: {
@@ -217,14 +217,14 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             const auto params = models::SqlQuery::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             // Get lobby
             auto lobby = get_requested_lobby(req);
             if (!lobby) {
                 send(proto_->Serialize(lobby.error()));
-                return;
+                lco_return;
             }
 
             // Error out for non-sql lobbies
@@ -233,7 +233,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
                                                    .return_code = ErrorCodes::Core::OperationInvalid,
                                                    .debug_message = "Lobby must be SQL lobby type"};
                 send(proto_->Serialize(resp));
-                return;
+                lco_return;
             }
 
             // Build response
@@ -259,11 +259,11 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Send response
             send(proto_->Serialize(resp));
-            return;
+            lco_return;
         }
 
         case OpCodes::Matchmaking::CreateGame: {
@@ -272,7 +272,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             const auto params = models::CreateGame::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             std::string game_id = params->get<DictKeyCodes::GameAndActor::GameId>();
@@ -283,7 +283,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             auto lobby = get_requested_lobby(req);
             if (!lobby) {
                 send(proto_->Serialize(lobby.error()));
-                return;
+                lco_return;
             }
 
             // Generate game ID if empty
@@ -296,7 +296,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
                                                          .return_code = ErrorCodes::Matchmaking::GameIdAlreadyExists,
                                                          .debug_message = "Game ID already exists"};
                 send(proto_->Serialize(resp));
-                return;
+                lco_return;
             }
 
             // Create new game with given ID
@@ -304,7 +304,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             auto game_expected = lobby.value()->create_game(std::move(game_id), get_random_gameserver_base_addr());
             if (!game_expected) {
                 send(proto_->Serialize(game_expected.error()));
-                return;
+                lco_return;
             }
             auto& game = *game_expected;
 
@@ -317,7 +317,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Synchronize game, peer and token
             peer_->log->info("Joining newly created game: {}", game->id);
@@ -327,7 +327,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             // Send response
             send(proto_->Serialize(resp));
 
-            return;
+            lco_return;
         }
 
         case OpCodes::Matchmaking::JoinGame: {
@@ -336,7 +336,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             const auto params = models::JoinGame::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             const std::string& game_id = params->get<DictKeyCodes::GameAndActor::GameId>();
@@ -347,7 +347,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             auto lobby = get_requested_lobby(req);
             if (!lobby) {
                 send(proto_->Serialize(lobby.error()));
-                return;
+                lco_return;
             }
 
             // Find game with given ID
@@ -361,7 +361,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
                                                              .return_code = ErrorCodes::Matchmaking::GameIdNotExists,
                                                              .debug_message = "Game does not exist"};
                     send(proto_->Serialize(resp));
-                    return;
+                    lco_return;
                 }
 
                 // Generate game ID if empty
@@ -374,7 +374,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
                 auto game_expected = lobby.value()->create_game(std::move(new_game_id), get_random_gameserver_base_addr());
                 if (!game_expected) {
                     send(proto_->Serialize(game_expected.error()));
-                    return;
+                    lco_return;
                 }
                 game = *game_expected;
 
@@ -389,7 +389,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
                                                          .return_code = ErrorCodes::Core::InternalServerError,
                                                          .debug_message = "Game has expired"};
                 send(proto_->Serialize(resp));
-                return;
+                lco_return;
             }
 
             // Validate join
@@ -400,13 +400,13 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
                                                              .return_code = join_validation_code,
                                                              .debug_message = std::string(join_validation_message)};
                     send(proto_->Serialize(resp));
-                    return;
+                    lco_return;
                 }
             }
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Expect user
             game->expected_users.emplace(peer_->persistent->user_id);
@@ -426,7 +426,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
 
             send(proto_->Serialize(resp));
 
-            return;
+            lco_return;
         }
 
         case OpCodes::Matchmaking::JoinRandomGame: {
@@ -435,14 +435,14 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             const auto params = models::JoinRandomGame::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             // Get lobby
             auto lobby = get_requested_lobby(req);
             if (!lobby) {
                 send(proto_->Serialize(lobby.error()));
-                return;
+                lco_return;
             }
 
             std::shared_ptr<Game> selected_game;
@@ -467,7 +467,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
                     ser::OperationResponseMessage resp{
                         .operation_code = OpCodes::Matchmaking::JoinRandomGame, .return_code = ErrorCodes::Core::OperationInvalid, .debug_message = e.what()};
                     send(proto_->Serialize(resp));
-                    return;
+                    lco_return;
                 }
             } else {
                 ser::Hashtable expected_props;
@@ -529,7 +529,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
                                                              .return_code = ErrorCodes::Matchmaking::NoRandomMatchFound,
                                                              .debug_message = "No matching game found"};
                     send(proto_->Serialize(resp));
-                    return;
+                    lco_return;
                 }
 
                 // Generate game ID if empty
@@ -541,7 +541,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
                 auto game_expected = lobby.value()->create_game(std::move(game_id), get_random_gameserver_base_addr());
                 if (!game_expected) {
                     send(proto_->Serialize(game_expected.error()));
-                    return;
+                    lco_return;
                 }
                 selected_game = *game_expected;
                 is_new = true;
@@ -549,7 +549,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
 
             // No turning back
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             // Expect users  TODO: expect all given users
             selected_game->expected_users.emplace(peer_->persistent->user_id);
@@ -571,7 +571,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             sync_persistent_peer(server_manager_, *peer_->persistent);
 
             send(proto_->Serialize(resp));
-            return;
+            lco_return;
         }
 
         case OpCodes::Social::FindFriends: {
@@ -580,7 +580,7 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             const auto params = models::FindFriends::decode(req);
             if (!params) {
                 send(proto_->Serialize(params.error()));
-                return;
+                lco_return;
             }
 
             const auto& friend_list = params->get<DictKeyCodes::AuthAndLobby::FindFriendsRequestList>();
@@ -625,15 +625,15 @@ void MasterServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& 
             resp.parameters[DictKeyCodes::AuthAndLobby::FindFriendsResponseRoomIdList] = std::move(room_list);
 
             if (!server_manager_.mark_command_committed())
-                return;
+                lco_return;
 
             send(proto_->Serialize(resp));
-            return;
+            lco_return;
         }
         }
     }
 
-    return HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
+    lco_return lco_await HandlerBase::HandleOperationRequest(std::move(req), is_encrypted, cmd_header);
 }
 
 std::expected<std::shared_ptr<Lobby>, ser::OperationResponseMessage> MasterServerHandler::get_requested_lobby(const ser::OperationRequestMessage& req) {

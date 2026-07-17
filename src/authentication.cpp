@@ -56,15 +56,15 @@ std::string get_anonymous_user_id(unsigned custom_anonymous_uid_mode, std::strin
 }
 } // namespace
 
-ser::OperationResponseMessage authenticate(ServerManager& server_manager, Peer& peer, const ser::OperationRequestMessage& req,
-                                           const enet::EnetCommandHeader& cmd_header, bool refresh_token) {
+Awaitable<ser::OperationResponseMessage> authenticate(ServerManager& server_manager, Peer& peer, const ser::OperationRequestMessage& req,
+                                                      const enet::EnetCommandHeader& cmd_header, bool refresh_token) {
     ZoneScoped;
 
     // Stop if maximum connection count is reached
     if (server_manager.get_max_connections() != 0 && server_manager.get_connection_count() > server_manager.get_max_connections()) {
-        return {.operation_code = req.operation_code,
-                .return_code = ErrorCodes::Throttling::MaxCcuReached,
-                .debug_message = std::format("Max CCU of {} reached", server_manager.get_max_connections())};
+        lco_return{.operation_code = req.operation_code,
+                   .return_code = ErrorCodes::Throttling::MaxCcuReached,
+                   .debug_message = std::format("Max CCU of {} reached", server_manager.get_max_connections())};
     }
 
     // Decide on algorithm based on the presence of the Token parameter
@@ -74,7 +74,7 @@ ser::OperationResponseMessage authenticate(ServerManager& server_manager, Peer& 
         // Token mechanism
         const auto params = models::TokenAuth::decode(req);
         if (!params)
-            return params.error();
+            lco_return params.error();
 
         server_manager.mark_command_committed();
         peer.persistent = load_persistent_peer(server_manager, params->get<DictKeyCodes::LoadBalancing::Token>(), refresh_token);
@@ -82,7 +82,7 @@ ser::OperationResponseMessage authenticate(ServerManager& server_manager, Peer& 
         // Regular mechanism
         const auto params = models::StandardAuth::decode(req);
         if (!params)
-            return params.error();
+            lco_return params.error();
 
         auto p = create_persistent_peer();
 
@@ -92,20 +92,20 @@ ser::OperationResponseMessage authenticate(ServerManager& server_manager, Peer& 
         const std::string app_version = version_ptr ? *version_ptr : "(poor attempt at emulating null app version)";
 
         peer.log->info("Client is using app {} (version {})", app_id, version_ptr ? *version_ptr : "(null)");
-        p->app = App::get(server_manager, app_id, app_version);
+        p->app = lco_await App::get(server_manager, app_id, app_version);
 
         // Make sure app is available
         if (!p->app)
-            return {.operation_code = req.operation_code, .return_code = ErrorCodes::Auth::InvalidAuthentication, .debug_message = "Invalid app id"};
+            lco_return{.operation_code = req.operation_code, .return_code = ErrorCodes::Auth::InvalidAuthentication, .debug_message = "Invalid app id"};
 
         // Get app settings
         const auto& app_settings = p->app->get_settings();
 
         // Make sure to not exceed max peer count of app
         if (app_settings.max_peers && p->app->get_peer_count() >= app_settings.max_peers)
-            return {.operation_code = req.operation_code,
-                    .return_code = ErrorCodes::Throttling::MaxCcuReached,
-                    .debug_message = std::format("Max CCU of {} reached", app_settings.max_peers)};
+            lco_return{.operation_code = req.operation_code,
+                       .return_code = ErrorCodes::Throttling::MaxCcuReached,
+                       .debug_message = std::format("Max CCU of {} reached", app_settings.max_peers)};
 
         // Extract authentication parameters
         const std::string *uid = params->get<DictKeyCodes::LoadBalancing::UserId>();
@@ -117,16 +117,16 @@ ser::OperationResponseMessage authenticate(ServerManager& server_manager, Peer& 
 
         } else if (auth_type == 0) {
             // Type 0 (Anonymous) specified or implied, but server strictly requires valid authentication
-            return {.operation_code = req.operation_code,
-                    .return_code = ErrorCodes::Auth::CustomAuthenticationFailed,
-                    .debug_message = "Anonymous authentication is not allowed"};
+            lco_return{.operation_code = req.operation_code,
+                       .return_code = ErrorCodes::Auth::CustomAuthenticationFailed,
+                       .debug_message = "Anonymous authentication is not allowed"};
 
         } else {
             // Strict mode with custom authentication type. A UserId is strictly mandatory here.
             if (!uid || uid->empty()) {
-                return {.operation_code = req.operation_code,
-                        .return_code = ErrorCodes::Auth::InvalidAuthentication,
-                        .debug_message = "User ID is required for custom authentication"};
+                lco_return{.operation_code = req.operation_code,
+                           .return_code = ErrorCodes::Auth::InvalidAuthentication,
+                           .debug_message = "User ID is required for custom authentication"};
             }
 
             // Check if the specific authentication provider is configured and allowed
@@ -137,9 +137,9 @@ ser::OperationResponseMessage authenticate(ServerManager& server_manager, Peer& 
 #endif
 
             if (!auth_provider_opt || !auth_provider_opt->is_allowed) {
-                return {.operation_code = req.operation_code,
-                        .return_code = ErrorCodes::Auth::CustomAuthenticationFailed,
-                        .debug_message = "Authentication provider is not allowed"};
+                lco_return{.operation_code = req.operation_code,
+                           .return_code = ErrorCodes::Auth::CustomAuthenticationFailed,
+                           .debug_message = "Authentication provider is not allowed"};
             }
 
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
@@ -156,17 +156,17 @@ ser::OperationResponseMessage authenticate(ServerManager& server_manager, Peer& 
                 } else {
                     auto err_resp = plugin_res->error();
                     err_resp.operation_code = req.operation_code;
-                    return err_resp;
+                    lco_return err_resp;
                 }
             } else {
-                return {.operation_code = req.operation_code,
-                        .return_code = ErrorCodes::Auth::CustomAuthenticationFailed,
-                        .debug_message = "Authentication type not available"};
+                lco_return{.operation_code = req.operation_code,
+                           .return_code = ErrorCodes::Auth::CustomAuthenticationFailed,
+                           .debug_message = "Authentication type not available"};
             }
 #else
-            return {.operation_code = req.operation_code,
-                    .return_code = ErrorCodes::Auth::CustomAuthenticationFailed,
-                    .debug_message = "Authentication plugins are disabled"};
+            lco_return{.operation_code = req.operation_code,
+                       .return_code = ErrorCodes::Auth::CustomAuthenticationFailed,
+                       .debug_message = "Authentication plugins are disabled"};
 #endif
         }
 
@@ -178,9 +178,9 @@ ser::OperationResponseMessage authenticate(ServerManager& server_manager, Peer& 
     // Check for success
     if (!peer.persistent) {
         // Handle authentication failure
-        return {.operation_code = req.operation_code,
-                .return_code = token_auth ? ErrorCodes::Auth::AuthenticationTokenExpired : ErrorCodes::Auth::InvalidAuthentication,
-                .debug_message = "Authentication failure: Got no persistent peer data"};
+        lco_return{.operation_code = req.operation_code,
+                   .return_code = token_auth ? ErrorCodes::Auth::AuthenticationTokenExpired : ErrorCodes::Auth::InvalidAuthentication,
+                   .debug_message = "Authentication failure: Got no persistent peer data"};
     }
 
     peer.log->info("Client has authenticated as: {}", peer.persistent->user_id);
@@ -188,6 +188,6 @@ ser::OperationResponseMessage authenticate(ServerManager& server_manager, Peer& 
     ser::OperationResponseMessage resp{.operation_code = req.operation_code};
     if (refresh_token)
         resp.parameters[DictKeyCodes::LoadBalancing::Token] = peer.persistent->token;
-    return resp;
+    lco_return resp;
 }
 } // namespace server

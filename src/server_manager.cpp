@@ -54,6 +54,7 @@
 #include "handler_nameserver.hpp"
 #include "handler_masterserver.hpp"
 #include "handler_gameserver.hpp"
+#include "coro_support.hpp"
 #include "yaml.hpp"
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 #include "ipc_codes.hpp"
@@ -686,7 +687,12 @@ bool ServerManager::run_once() {
     return running_;
 }
 
-std::shared_ptr<App> ServerManager::get_app(const AppInfo& info) { return App::get(*this, std::string(info.id), std::string(info.version)); }
+Awaitable<std::shared_ptr<App>> ServerManager::get_app(const AppInfo& info) {
+    lco_return lco_await App::get(*this, std::string(info.id), std::string(info.version));
+}
+
+std::shared_ptr<App> ServerManager::try_get_app(const AppInfo& info) { return App::try_get(*this, std::string(info.id), std::string(info.version)); }
+
 std::shared_ptr<Lobby> ServerManager::get_lobby(App& app, const LobbyInfo& info) { return app.get_lobby(info); }
 std::expected<std::shared_ptr<Game>, std::string> ServerManager::get_game(Lobby& lobby, const GameInfo& info) {
     auto game = lobby.create_game(std::string(info.id), info.server_address, true);
@@ -727,29 +733,29 @@ void ServerManager::setup_http_server() {
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
-void ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& msg) {
+Awaitable<void> ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& msg) {
     ipc_broadcast_skip_ = &sender;
 
     // Only accept event messages
     auto *event_msg = msg.get_if<ser::EventMessage>();
     if (!event_msg)
-        return;
+        lco_return;
 
-    return process_ipc_event(*event_msg);
+    lco_return lco_await process_ipc_event(*event_msg);
 }
 
-void ServerManager::process_parent_ipc_message(IPC& sender, const ser::Message& msg) {
+Awaitable<void> ServerManager::process_parent_ipc_message(IPC& sender, const ser::Message& msg) {
     ipc_broadcast_skip_ = &sender;
 
     // Only accept event messages
     auto *event_msg = msg.get_if<ser::EventMessage>();
     if (!event_msg)
-        return;
+        lco_return;
 
-    return process_ipc_event(*event_msg);
+    lco_return lco_await process_ipc_event(*event_msg);
 }
 
-void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
+Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
     const auto& params = event_msg.parameters;
 
     // Handle lobby/game updates
@@ -770,7 +776,7 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
                 external_games_.erase(it);
             }
 
-            return;
+            lco_return;
         } else if (event_msg.event_code == IPCEventCodes::GameUpdate) {
             // Handle game update
             std::shared_ptr<Game> game;
@@ -780,16 +786,16 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
             if (it != external_games_.end()) {
                 game = *it;
             } else {
-                auto app = App::get(*this, std::string(game_info.lobby.app.id), std::string(game_info.lobby.app.version));
+                auto app = lco_await App::get(*this, std::string(game_info.lobby.app.id), std::string(game_info.lobby.app.version));
                 if (!app) {
                     log_->error("Failed to synchronize game via IPC: Unable to get matching application");
-                    return;
+                    lco_return;
                 }
 
                 auto lobby = app->get_lobby({game_info.lobby.name, game_info.lobby.type});
                 if (!lobby) {
                     log_->error("Failed to synchronize game via IPC: Unable to get matching lobby");
-                    return;
+                    lco_return;
                 }
 
                 std::string_view address;
@@ -797,7 +803,7 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
                     address = *address_ptr;
                 if (address.empty()) {
                     log_->error("Failed to synchronize game via IPC: Unable to get matching address");
-                    return;
+                    lco_return;
                 }
 
                 auto expected_game = lobby->create_game(std::string(game_info.id), address, true);
@@ -809,7 +815,7 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
                         is_new = true;
                     } else {
                         log_->error("Failed to synchronize game via IPC: Unable to create matching game");
-                        return;
+                        lco_return;
                     }
                 }
             }
@@ -830,7 +836,7 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
             if (is_new)
                 reset_persistent_peer_game_ownership(*this, *game);
 
-            return;
+            lco_return;
         }
     }
 
@@ -842,7 +848,7 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
             token = token_param.get<std::string>();
         } else {
             log_->error("Failed to decode persistent peer received via IPC: Could not get token string");
-            return;
+            lco_return;
         }
 
         // Get user id
@@ -851,7 +857,7 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
             user_id = user_id_param.get<std::string>();
         } else {
             log_->error("Failed to decode persistent peer received via IPC: Could not get user id string");
-            return;
+            lco_return;
         }
 
         auto pp = create_persistent_peer();
@@ -859,10 +865,10 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
         pp->user_id = user_id;
 
         const auto game_info = Game::decode_game_info(params);
-        pp->app = get_app(game_info.lobby.app);
+        pp->app = lco_await get_app(game_info.lobby.app);
         if (!pp->app) {
             log_->error("Failed to store persistent peer received via IPC: Could not get associated app");
-            return;
+            lco_return;
         }
 
         if (auto lobby = get_lobby(*pp->app, game_info.lobby))
@@ -870,7 +876,7 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
 
         store_persistent_peer(*this, std::move(pp));
 
-        return;
+        lco_return;
     }
 }
 #endif
@@ -954,63 +960,69 @@ void ServerManager::setup() {
             };
 
             enetPeer->on_state_changed = [this, handler = raw_handler](enet::EnetConnectionState state) {
-                try {
-                    handler->HandleENetConnectionStateChange(state);
-                } catch (const std::exception& e) {
-                    auto& peer = *handler->get_peer();
-                    peer.log->warn("Uncaught exception in ENet connect state change handler: {}", e.what());
-                }
+                lco_background([](ServerManager& self, enet::EnetConnectionState state, server::HandlerBase *handler) -> Awaitable<> {
+                    try {
+                        lco_await handler->HandleENetConnectionStateChange(state);
+                    } catch (const std::exception& e) {
+                        auto& peer = *handler->get_peer();
+                        peer.log->warn("Uncaught exception in ENet connect state change handler: {}", e.what());
+                    }
 
-                if (state == luxon::enet::EnetConnectionState::Connected)
-                    handler->HandleConnect();
+                    if (state == luxon::enet::EnetConnectionState::Connected)
+                        lco_await handler->HandleConnect();
 
-                if (state == enet::EnetConnectionState::Disconnected) {
-                    handler->HandleDisconnect();
-                    // Self-destruct handler, this will invalidate the pointer
-                    add_scheduled_task(0, [this, handler]() { connections_.remove_if([handler](auto& v) { return v.get() == handler; }); });
-                }
+                    if (state == enet::EnetConnectionState::Disconnected) {
+                        lco_await handler->HandleDisconnect();
+                        // Self-destruct handler, this will invalidate the pointer
+                        self.add_scheduled_task(0, [&self, handler]() { self.connections_.remove_if([handler](auto& v) { return v.get() == handler; }); });
+                    }
+                }(*this, state, handler));
             };
 
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
-            enetPeer->on_payload_command = [this, handler_weak = std::weak_ptr<HandlerBase>(handler_ptr)](enet::EnetCommand&& cmd) {
-                auto handler = handler_weak.lock();
-                if (!handler)
-                    return;
+            enetPeer->on_payload_command = [this, handler_capture = std::weak_ptr<HandlerBase>(handler_ptr)](enet::EnetCommand&& cmd) {
+                lco_background([](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
+                    auto handler = h_token.lock();
+                    if (!handler)
+                        lco_return;
 #else
-            enetPeer->on_payload_command = [this, handler = handler_ptr](enet::EnetCommand&& cmd) {
+            enetPeer->on_payload_command = [this, handler_capture = handler_ptr](enet::EnetCommand&& cmd) {
+                lco_background([](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
+                    auto *handler = h_token;
 #endif
-                auto& peer = handler->get_peer();
+                    auto& peer = handler->get_peer();
 
 #ifndef NDEBUG
-                peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
-                                 cmd.header.channel_id);
-                if (!visualizer::print_ser_message(cmd.get_payload(), 2, *peer->protocol)) {
-                    if (!visualizer::print_http_message(cmd.get_payload(), 2)) {
-                        peer->log->error("Message not understood!");
-                        visualizer::helpers::print_hex_dump(cmd.get_payload(), 2);
+                    peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
+                                     cmd.header.channel_id);
+                    if (!visualizer::print_ser_message(cmd.get_payload(), 2, *peer->protocol)) {
+                        if (!visualizer::print_http_message(cmd.get_payload(), 2)) {
+                            peer->log->error("Message not understood!");
+                            visualizer::helpers::print_hex_dump(cmd.get_payload(), 2);
+                        }
                     }
-                }
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
-                active_command_restarter_ = CommandRestarter::create(handler, cmd);
-                active_command_restarter_allowed_ = true;
-                inside_command_ = true;
+                    self.active_command_restarter_ = CommandRestarter::create(handler, cmd);
+                    self.active_command_restarter_allowed_ = true;
+                    self.inside_command_ = true;
 #endif
-                try {
-                    handler->HandleENetCommand(std::move(cmd));
-                } catch (const std::exception& e) {
-                    peer->log->critical("Disconnecting due to uncaught exception in ENet command handler: {}", e.what());
-                    peer->disconnect();
-                }
+                    try {
+                        lco_await handler->HandleENetCommand(std::move(cmd));
+                    } catch (const std::exception& e) {
+                        peer->log->critical("Disconnecting due to uncaught exception in ENet command handler: {}", e.what());
+                        peer->disconnect();
+                    }
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
-                inside_command_ = false;
-                if (active_command_restarter_allowed_ && !should_abort_active_command()) {
-                    peer->log->warn("Command did not commit!");
-                    mark_command_committed();
-                }
-                active_command_restarter_.reset();
+                    self.inside_command_ = false;
+                    if (self.active_command_restarter_allowed_ && !self.should_abort_active_command()) {
+                        peer->log->warn("Command did not commit!");
+                        self.mark_command_committed();
+                    }
+                    self.active_command_restarter_.reset();
 #endif
+                }(*this, std::move(cmd), std::move(handler_capture)));
             };
 
             // Add to connection list
