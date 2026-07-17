@@ -6,46 +6,37 @@
 #include <stdexcept>
 #include <utility>
 
-namespace basiccoro
-{
-namespace detail
-{
+namespace basiccoro {
+namespace detail {
 
-template<class Derived>
-struct PromiseBase
-{
+template <class Derived> struct PromiseBase {
+    std::exception_ptr exception_;
+
     auto get_return_object() { return std::coroutine_handle<Derived>::from_promise(static_cast<Derived&>(*this)); }
-    void unhandled_exception() { std::terminate(); }
+    void unhandled_exception() { exception_ = std::current_exception(); }
 };
 
-template<class Derived, class T> requires std::movable<T> || std::same_as<T, void>
-struct ValuePromise : public PromiseBase<Derived>
-{
+template <class Derived, class T>
+    requires std::movable<T> || std::same_as<T, void>
+struct ValuePromise : public PromiseBase<Derived> {
     using value_type = T;
     T val;
     void return_value(T t) { val = std::move(t); }
 };
 
-template<class Derived>
-struct ValuePromise<Derived, void> : public PromiseBase<Derived>
-{
+template <class Derived> struct ValuePromise<Derived, void> : public PromiseBase<Derived> {
     using value_type = void;
     void return_void() {}
 };
 
-template<class T>
-class AwaitablePromise : public ValuePromise<AwaitablePromise<T>, T>
-{
+template <class T> class AwaitablePromise : public ValuePromise<AwaitablePromise<T>, T> {
 public:
     auto initial_suspend() { return std::suspend_never(); }
 
-    auto final_suspend() noexcept
-    {
-        if (waiting_)
-        {
+    auto final_suspend() noexcept {
+        if (waiting_) {
             waiting_.resume();
-            if (waiting_.done())
-            {
+            if (waiting_.done()) {
                 waiting_.destroy();
             }
             waiting_ = nullptr;
@@ -54,20 +45,16 @@ public:
         return std::suspend_always();
     }
 
-    void storeWaiting(std::coroutine_handle<> handle)
-    {
-        if (waiting_)
-        {
+    void storeWaiting(std::coroutine_handle<> handle) {
+        if (waiting_) {
             throw std::runtime_error("AwaitablePromise::storeWaiting(): already waiting");
         }
 
         waiting_ = handle;
     }
 
-    ~AwaitablePromise()
-    {
-        if (waiting_)
-        {
+    ~AwaitablePromise() {
+        if (waiting_) {
             waiting_.destroy();
         }
     }
@@ -76,9 +63,7 @@ private:
     std::coroutine_handle<> waiting_ = nullptr;
 };
 
-template<class Promise>
-class TaskBase
-{
+template <class Promise> class TaskBase {
 public:
     using promise_type = Promise;
 
@@ -97,86 +82,62 @@ protected:
     bool handleShouldBeDestroyed_;
 };
 
-template<class Promise>
-TaskBase<Promise>::TaskBase()
-    : handle_(nullptr), handleShouldBeDestroyed_(false)
-{}
+template <class Promise> TaskBase<Promise>::TaskBase() : handle_(nullptr), handleShouldBeDestroyed_(false) {}
 
-template<class Promise>
-TaskBase<Promise>::TaskBase(std::coroutine_handle<promise_type> handle)
-    : handle_(handle)
-{
+template <class Promise> TaskBase<Promise>::TaskBase(std::coroutine_handle<promise_type> handle) : handle_(handle) {
     // TODO: this whole system needs revamping with something like UniqueCoroutineHandle
     // and custom static interface to awaiter types - so await_suspend method would take in UniqueCoroutineHandle
 
-    if (handle.done())
-    {
+    if (handle.done()) {
         // it is resonable to expect that if the coroutine is done before
         // the task creation, then the original stack is continued without suspending,
         // and coroutine needs to be destroyed with TaskBase object
         handleShouldBeDestroyed_ = true;
-    }
-    else
-    {
+    } else {
         // otherwise the coroutine should be managed by object that it is awaiting
         handleShouldBeDestroyed_ = false;
     }
 }
 
-template<class Promise>
-TaskBase<Promise>::TaskBase(TaskBase&& other)
-    : handle_(other.handle_), handleShouldBeDestroyed_(std::exchange(other.handleShouldBeDestroyed_, false))
-{
-}
+template <class Promise>
+TaskBase<Promise>::TaskBase(TaskBase&& other) : handle_(other.handle_), handleShouldBeDestroyed_(std::exchange(other.handleShouldBeDestroyed_, false)) {}
 
-template<class Promise>
-TaskBase<Promise>& TaskBase<Promise>::operator=(TaskBase&& other)
-{
+template <class Promise> TaskBase<Promise>& TaskBase<Promise>::operator=(TaskBase&& other) {
     handle_ = other.handle_;
     handleShouldBeDestroyed_ = std::exchange(other.handleShouldBeDestroyed_, false);
     return *this;
 }
 
-template<class Promise>
-TaskBase<Promise>::~TaskBase()
-{
-    if (handleShouldBeDestroyed_)
-    {
+template <class Promise> TaskBase<Promise>::~TaskBase() {
+    if (handleShouldBeDestroyed_) {
         handle_.destroy();
     }
 }
 
-}  // namespace detail
+} // namespace detail
 
 template <class T> class [[nodiscard]] AwaitableTask : public detail::TaskBase<detail::AwaitablePromise<T>> {
     using Base = detail::TaskBase<detail::AwaitablePromise<T>>;
 
 public:
-   using Base::Base;
+    using Base::Base;
 
     class awaiter;
     friend class awaiter;
     awaiter operator co_await() const;
 };
 
-template<class T>
-struct AwaitableTask<T>::awaiter
-{
-    bool await_ready()
-    {
-        return task_.done();
-    }
+template <class T> struct AwaitableTask<T>::awaiter {
+    bool await_ready() { return task_.done(); }
 
-    template<class Promise>
-    void await_suspend(std::coroutine_handle<Promise> handle)
-    {
-        task_.handle_.promise().storeWaiting(handle);
-    }
+    template <class Promise> void await_suspend(std::coroutine_handle<Promise> handle) { task_.handle_.promise().storeWaiting(handle); }
 
-    T await_resume()
-    {
-        if constexpr (!std::is_same_v<void, T>)
-        {
+    T await_resume() {
+        if (task_.handle_.promise().exception_) {
+            std::rethrow_exception(task_.handle_.promise().exception_);
+        }
+
+        if constexpr (!std::is_same_v<void, T>) {
             return std::move(task_.handle_.promise().val);
         }
     }
@@ -184,10 +145,6 @@ struct AwaitableTask<T>::awaiter
     const AwaitableTask& task_;
 };
 
-template<class T>
-typename AwaitableTask<T>::awaiter AwaitableTask<T>::operator co_await() const
-{
-    return awaiter{*this};
-}
+template <class T> typename AwaitableTask<T>::awaiter AwaitableTask<T>::operator co_await() const { return awaiter{*this}; }
 
-}  // namespace basiccoro
+} // namespace basiccoro
