@@ -127,10 +127,12 @@ template <typename HandleT> inline HandleT wrap(std::nullptr_t) {
 #endif
 }
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
 struct FfiCoroContext {
     void *awaiter_handle = nullptr;
 };
 static thread_local std::stack<FfiCoroContext *> t_coro_stack;
+#endif
 
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
 static std::atomic<uint32_t> g_next_plugin_id{1};
@@ -161,8 +163,10 @@ public:
 
     server::Awaitable<server::game_plugins::Result> OnCreateGame(luxon::ser::OperationRequestMessage& req,
                                                                  server::game_plugins::OnCreateGameCallInfo& info) override {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         FfiCoroContext ctx;
         t_coro_stack.push(&ctx);
+#endif
 
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
@@ -175,10 +179,12 @@ public:
                                                    info.is_join, info.create_if_not_exist);
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         t_coro_stack.pop();
 
         if (res == LUXON_PLUGIN_RESULT_ASYNC)
             res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
 
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
@@ -186,8 +192,10 @@ public:
 
     server::Awaitable<server::game_plugins::Result> BeforeJoin(luxon::ser::OperationRequestMessage& req,
                                                                server::game_plugins::BeforeJoinGameCallInfo& info) override {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         FfiCoroContext ctx;
         t_coro_stack.push(&ctx);
+#endif
 
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
@@ -198,10 +206,12 @@ public:
             res = g_imports.gamePluginBeforeJoin(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<PeerHandle>(info.joiner.get()));
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         t_coro_stack.pop();
 
         if (res == LUXON_PLUGIN_RESULT_ASYNC)
             res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
 
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
@@ -209,8 +219,10 @@ public:
 
     server::Awaitable<server::game_plugins::Result> OnJoinGame(luxon::ser::OperationRequestMessage& req,
                                                                server::game_plugins::OnJoinGameCallInfo& info) override {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         FfiCoroContext ctx;
         t_coro_stack.push(&ctx);
+#endif
 
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
@@ -221,10 +233,12 @@ public:
             res = g_imports.gamePluginOnJoinGame(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.joiner));
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         t_coro_stack.pop();
 
         if (res == LUXON_PLUGIN_RESULT_ASYNC)
             res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
 
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
@@ -232,8 +246,10 @@ public:
 
     server::Awaitable<server::game_plugins::Result> OnLeave(luxon::ser::OperationRequestMessage& req,
                                                             server::game_plugins::OnLeaveGameCallInfo& info) override {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         FfiCoroContext ctx;
         t_coro_stack.push(&ctx);
+#endif
 
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
@@ -244,10 +260,12 @@ public:
             res = g_imports.gamePluginOnLeave(plugin_id_, wrap<GameHandle>(game_), wrap<SerMessageHandle>(&msg_ref), wrap<GamePeerHandle>(info.leaver));
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         t_coro_stack.pop();
 
         if (res == LUXON_PLUGIN_RESULT_ASYNC)
             res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
 
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
@@ -255,8 +273,10 @@ public:
 
     server::Awaitable<server::game_plugins::Result> OnRaiseEvent(luxon::ser::OperationRequestMessage& req,
                                                                  server::game_plugins::OnRaiseEventCallInfo& info) override {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         FfiCoroContext ctx;
         t_coro_stack.push(&ctx);
+#endif
 
         uint8_t res = 0;
         luxon::ser::Message msg_ref(&req);
@@ -269,10 +289,12 @@ public:
                                                    wrap<EventHandle>(&info.event), info.cache_op);
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         t_coro_stack.pop();
 
         if (res == LUXON_PLUGIN_RESULT_ASYNC)
             res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
 
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
@@ -280,8 +302,10 @@ public:
 
     server::Awaitable<server::game_plugins::Result> BeforeSetProperties(luxon::ser::OperationRequestMessage& req,
                                                                         server::game_plugins::BeforeSetPropertiesCallInfo& info) override {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         FfiCoroContext ctx;
         t_coro_stack.push(&ctx);
+#endif
 
         uint8_t res = 0;
         luxon::ser::Value up_val(info.update);
@@ -297,10 +321,12 @@ public:
                                                           wrap<SerValueHandle>(&up_val), wrap<SerValueHandle>(&exp_val));
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         t_coro_stack.pop();
 
         if (res == LUXON_PLUGIN_RESULT_ASYNC)
             res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
 
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
@@ -308,8 +334,10 @@ public:
 
     server::Awaitable<server::game_plugins::Result> OnSetProperties(luxon::ser::OperationRequestMessage& req,
                                                                     server::game_plugins::OnSetPropertiesCallInfo& info) override {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         FfiCoroContext ctx;
         t_coro_stack.push(&ctx);
+#endif
 
         uint8_t res = 0;
         luxon::ser::Value up_val(info.update);
@@ -324,10 +352,12 @@ public:
                                                       info.broadcast, info.target_actor_id, wrap<SerValueHandle>(&up_val), wrap<SerValueHandle>(&exp_val));
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
         t_coro_stack.pop();
 
         if (res == LUXON_PLUGIN_RESULT_ASYNC)
             res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
 
         update_req_from_updated_msg(req, msg_ref);
         lco_return static_cast<server::game_plugins::Result>(res);
@@ -1923,8 +1953,10 @@ void registerHookpoints(ServerManagerHandle manager) {
 
         m->hookpoints.MasterServer_HandleOperationRequest_JoinGame = [](server::MasterServerHandler& handler, const std::string& game_id,
                                                                         bool is_join) -> Awaitable<bool> {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
             FfiCoroContext ctx;
             t_coro_stack.push(&ctx);
+#endif
 
             uint8_t res = 0;
 
@@ -1935,17 +1967,21 @@ void registerHookpoints(ServerManagerHandle manager) {
                 res = g_imports.hookpointMasterServerHandleOperationRequestJoinGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str(), is_join);
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
             t_coro_stack.pop();
 
             if (res == LUXON_HOOKPOINT_RESULT_ASYNC)
                 res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
 
             lco_return res == LUXON_HOOKPOINT_RESULT_OVERRIDE;
         };
 
         m->hookpoints.MasterServer_HandleOperationRequest_CreateGame = [](server::MasterServerHandler& handler, const std::string& game_id) -> Awaitable<bool> {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
             FfiCoroContext ctx;
             t_coro_stack.push(&ctx);
+#endif
 
             uint8_t res = 0;
 
@@ -1956,18 +1992,22 @@ void registerHookpoints(ServerManagerHandle manager) {
                 res = g_imports.hookpointMasterServerHandleOperationRequestCreateGame(wrap<HandlerBaseHandle>(&handler), game_id.c_str());
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
             t_coro_stack.pop();
 
             if (res == LUXON_HOOKPOINT_RESULT_ASYNC)
                 res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
 
             lco_return res == LUXON_HOOKPOINT_RESULT_OVERRIDE;
         };
 
         m->hookpoints.HandlerBase_HandleENetCommand_OnMessage = [](server::HandlerBase& handler, luxon::ser::Message& message,
                                                                    luxon::enet::EnetCommandHeader& /*header*/) -> Awaitable<bool> {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
             FfiCoroContext ctx;
             t_coro_stack.push(&ctx);
+#endif
 
             uint8_t res = 0;
 
@@ -1978,10 +2018,12 @@ void registerHookpoints(ServerManagerHandle manager) {
                 res = g_imports.hookpointHandlerBaseHandleENetCommandOnMessage(wrap<HandlerBaseHandle>(&handler), wrap<SerMessageHandle>(&message));
 #endif
 
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
             t_coro_stack.pop();
 
             if (res == LUXON_HOOKPOINT_RESULT_ASYNC)
                 res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
 
             lco_return res == LUXON_HOOKPOINT_RESULT_OVERRIDE;
         };
