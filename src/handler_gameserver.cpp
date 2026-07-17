@@ -146,7 +146,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
 
             // Set current game
             auto& pp = *peer_->persistent;
-            auto expected_game = lco_await server_manager_.get_game(pp.get_invitation());
+            auto expected_game = server_manager_.get_game(pp.get_invitation());
             pp.reset_game(); // Effectively expire peer's game invitation and memory ownership
             if (expected_game) {
                 if (server_manager_.is_game_external(**expected_game)) {

@@ -44,12 +44,12 @@ void AppSettings::enforce_global_config(ServerManager& server_manager) {
 
 App::App(ServerManager& server_manager, std::string_view id, std::string_view version) : server_manager(server_manager), id(id), version(version) {}
 
-Awaitable<bool> App::load_app_settings() {
+bool App::load_app_settings() {
     // Get settings
-    const bool fres = co_await [this]() -> Awaitable<bool> {
+    const bool fres = [this]() -> bool {
         // Try hookpoint
         bool hookpoint_success = true;
-        LUXON_SERVER_HOOKPOINT_CSM(server_manager, App_load_app_settings, settings_, hookpoint_success) hookpoint_success;
+        LUXON_SERVER_HOOKPOINT_CSM_SYNC(server_manager, App_load_app_settings, settings_, hookpoint_success) hookpoint_success;
 
         // Try database
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
@@ -57,18 +57,18 @@ Awaitable<bool> App::load_app_settings() {
             if (const auto settings = server_manager.settings_manager->get_app_settings(std::string(id)))
                 settings_ = *settings;
             else
-                lco_return false;
+                return false;
         }
 
 #endif
-        lco_return true;
+        return true;
     }();
 
     // Enforce globally configured caps
     if (fres)
         settings_.enforce_global_config(server_manager);
 
-    lco_return fres;
+    return fres;
 }
 
 size_t App::get_game_count() const {
@@ -132,12 +132,12 @@ std::shared_ptr<App> App::try_get(ServerManager& server_manager, const std::stri
     return nullptr;
 }
 
-Awaitable<std::shared_ptr<App>> App::get(ServerManager& server_manager, const std::string& id, const std::string& version) {
+std::shared_ptr<App> App::get(ServerManager& server_manager, const std::string& id, const std::string& version) {
     ZoneScoped;
 
     if (auto res = server_manager.apps.find({id, version}); res != server_manager.apps.end()) {
         if (auto fres = res->second.lock())
-            lco_return fres;
+            return fres;
         else
             server_manager.apps.erase(res);
     }
@@ -151,13 +151,13 @@ Awaitable<std::shared_ptr<App>> App::get(ServerManager& server_manager, const st
     });
 
     if (!fres)
-        lco_return nullptr;
+        return nullptr;
 
-    if (!lco_await fres->load_app_settings())
-        lco_return nullptr;
+    if (!fres->load_app_settings())
+        return nullptr;
 
     res.first->second = fres;
-    lco_return fres;
+    return fres;
 }
 
 std::vector<std::shared_ptr<App>> App::get_all(ServerManager& server_manager) {

@@ -1841,7 +1841,7 @@ void registerHookpoints(ServerManagerHandle manager) {
 #endif
         };
 
-        m->hookpoints.App_load_app_settings = [](server::App& app, server::AppSettings& /*settings*/, bool& success) -> Awaitable<bool> {
+        m->hookpoints.App_load_app_settings = [](server::App& app, server::AppSettings& /*settings*/, bool& success) -> bool {
             bool out_success = false;
             bool handled = false;
 #if defined(FFI_WASM) || defined(__wasm__)
@@ -1852,7 +1852,7 @@ void registerHookpoints(ServerManagerHandle manager) {
 #endif
             if (handled)
                 success = out_success;
-            lco_return handled;
+            return handled;
         };
     });
 #endif

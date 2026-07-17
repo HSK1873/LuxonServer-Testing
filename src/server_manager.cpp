@@ -687,9 +687,7 @@ bool ServerManager::run_once() {
     return running_;
 }
 
-Awaitable<std::shared_ptr<App>> ServerManager::get_app(const AppInfo& info) {
-    lco_return lco_await App::get(*this, std::string(info.id), std::string(info.version));
-}
+std::shared_ptr<App> ServerManager::get_app(const AppInfo& info) { return App::get(*this, std::string(info.id), std::string(info.version)); }
 
 std::shared_ptr<App> ServerManager::try_get_app(const AppInfo& info) { return App::try_get(*this, std::string(info.id), std::string(info.version)); }
 
@@ -733,29 +731,29 @@ void ServerManager::setup_http_server() {
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
-Awaitable<void> ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& msg) {
+void ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& msg) {
     ipc_broadcast_skip_ = &sender;
 
     // Only accept event messages
     auto *event_msg = msg.get_if<ser::EventMessage>();
     if (!event_msg)
-        lco_return;
+        return;
 
-    lco_return lco_await process_ipc_event(*event_msg);
+    return process_ipc_event(*event_msg);
 }
 
-Awaitable<void> ServerManager::process_parent_ipc_message(IPC& sender, const ser::Message& msg) {
+void ServerManager::process_parent_ipc_message(IPC& sender, const ser::Message& msg) {
     ipc_broadcast_skip_ = &sender;
 
     // Only accept event messages
     auto *event_msg = msg.get_if<ser::EventMessage>();
     if (!event_msg)
-        lco_return;
+        return;
 
-    lco_return lco_await process_ipc_event(*event_msg);
+    return process_ipc_event(*event_msg);
 }
 
-Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
+void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
     const auto& params = event_msg.parameters;
 
     // Handle lobby/game updates
@@ -776,7 +774,7 @@ Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_
                 external_games_.erase(it);
             }
 
-            lco_return;
+            return;
         } else if (event_msg.event_code == IPCEventCodes::GameUpdate) {
             // Handle game update
             std::shared_ptr<Game> game;
@@ -786,16 +784,16 @@ Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_
             if (it != external_games_.end()) {
                 game = *it;
             } else {
-                auto app = lco_await App::get(*this, std::string(game_info.lobby.app.id), std::string(game_info.lobby.app.version));
+                auto app = App::get(*this, std::string(game_info.lobby.app.id), std::string(game_info.lobby.app.version));
                 if (!app) {
                     log_->error("Failed to synchronize game via IPC: Unable to get matching application");
-                    lco_return;
+                    return;
                 }
 
                 auto lobby = app->get_lobby({game_info.lobby.name, game_info.lobby.type});
                 if (!lobby) {
                     log_->error("Failed to synchronize game via IPC: Unable to get matching lobby");
-                    lco_return;
+                    return;
                 }
 
                 std::string_view address;
@@ -803,7 +801,7 @@ Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_
                     address = *address_ptr;
                 if (address.empty()) {
                     log_->error("Failed to synchronize game via IPC: Unable to get matching address");
-                    lco_return;
+                    return;
                 }
 
                 auto expected_game = lobby->create_game(std::string(game_info.id), address, true);
@@ -815,7 +813,7 @@ Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_
                         is_new = true;
                     } else {
                         log_->error("Failed to synchronize game via IPC: Unable to create matching game");
-                        lco_return;
+                        return;
                     }
                 }
             }
@@ -836,7 +834,7 @@ Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_
             if (is_new)
                 reset_persistent_peer_game_ownership(*this, *game);
 
-            lco_return;
+            return;
         }
     }
 
@@ -848,7 +846,7 @@ Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_
             token = token_param.get<std::string>();
         } else {
             log_->error("Failed to decode persistent peer received via IPC: Could not get token string");
-            lco_return;
+            return;
         }
 
         // Get user id
@@ -857,7 +855,7 @@ Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_
             user_id = user_id_param.get<std::string>();
         } else {
             log_->error("Failed to decode persistent peer received via IPC: Could not get user id string");
-            lco_return;
+            return;
         }
 
         auto pp = create_persistent_peer();
@@ -865,10 +863,10 @@ Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_
         pp->user_id = user_id;
 
         const auto game_info = Game::decode_game_info(params);
-        pp->app = lco_await get_app(game_info.lobby.app);
+        pp->app = get_app(game_info.lobby.app);
         if (!pp->app) {
             log_->error("Failed to store persistent peer received via IPC: Could not get associated app");
-            lco_return;
+            return;
         }
 
         if (auto lobby = get_lobby(*pp->app, game_info.lobby))
@@ -876,7 +874,7 @@ Awaitable<void> ServerManager::process_ipc_event(const ser::EventMessage& event_
 
         store_persistent_peer(*this, std::move(pp));
 
-        lco_return;
+        return;
     }
 }
 #endif
