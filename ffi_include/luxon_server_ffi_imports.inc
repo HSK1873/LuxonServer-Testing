@@ -175,25 +175,18 @@ FFI_IMPORT(uint8_t, gamePluginOnCloseGame, (uint32_t plugin_id, GameHandle game,
  * @param out_user_id Output buffer where the verified unique User ID should be written
  * @param max_user_id_len Maximum length of the out_user_id buffer
  * @param out_err_resp If authentication fails, a serialized error message can be written here
- * @return True if authentication succeeded, false otherwise
+ * @return A LuxonAuthPluginResult value (0 = Failed, 1 = Success, 127 = Async)
  */
-FFI_IMPORT(bool, authPluginOnAuthenticate,
+FFI_IMPORT(uint8_t, authPluginOnAuthenticate,
            (unsigned type, const char *requested_user_id, const char *params, const char *data, const char *secret, const char *auth_url, char *out_user_id,
             ffi_size_t max_user_id_len, SerMessageHandle out_err_resp),
            type, requested_user_id, params, data, secret, auth_url, out_user_id, max_user_id_len, out_err_resp)
 #else
 /* --- PLUGINS PADDING --- */
 FFI_IMPORT_PAD(gamePluginOnAttach)
-FFI_IMPORT_PAD(gamePluginOnCreateGame)
-FFI_IMPORT_PAD(gamePluginBeforeJoin)
-FFI_IMPORT_PAD(gamePluginOnJoinGame)
-FFI_IMPORT_PAD(gamePluginOnLeave)
-FFI_IMPORT_PAD(gamePluginOnRaiseEvent)
-FFI_IMPORT_PAD(gamePluginBeforeSetProperties)
-FFI_IMPORT_PAD(gamePluginOnSetProperties)
-FFI_IMPORT_PAD(gamePluginBeforeCloseGame)
-FFI_IMPORT_PAD(gamePluginOnCloseGame)
-FFI_IMPORT_PAD(authPluginOnAuthenticate)
+FFI_IMPORT_PAD(gamePluginOnCreateGame) FFI_IMPORT_PAD(gamePluginBeforeJoin) FFI_IMPORT_PAD(gamePluginOnJoinGame) FFI_IMPORT_PAD(gamePluginOnLeave)
+    FFI_IMPORT_PAD(gamePluginOnRaiseEvent) FFI_IMPORT_PAD(gamePluginBeforeSetProperties) FFI_IMPORT_PAD(gamePluginOnSetProperties)
+        FFI_IMPORT_PAD(gamePluginBeforeCloseGame) FFI_IMPORT_PAD(gamePluginOnCloseGame) FFI_IMPORT_PAD(authPluginOnAuthenticate)
 #endif
 
 #ifndef LUXON_SERVER_USE_SPDLOG
@@ -206,8 +199,8 @@ FFI_IMPORT_PAD(authPluginOnAuthenticate)
  */
 FFI_IMPORT(void, customLogSink, (int32_t level, const char *message), level, message)
 #else
-/* --- LOGGER PADDING --- */
-FFI_IMPORT_PAD(customLogSink)
+    /* --- LOGGER PADDING --- */
+    FFI_IMPORT_PAD(customLogSink)
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_HOOKPOINTS
@@ -241,16 +234,14 @@ FFI_IMPORT(uint8_t, hookpointHandlerBaseHandleENetCommandOnMessage, (HandlerBase
 
 FFI_IMPORT_PAD(hookpointAppLoadAppSettings)
 #else
-/* --- HOOKPOINTS PADDING --- */
-FFI_IMPORT_PAD(hookpointMasterServerHandleOperationRequestJoinGame)
-FFI_IMPORT_PAD(hookpointMasterServerHandleOperationRequestCreateGame)
-FFI_IMPORT_PAD(hookpointHandlerBaseHandleENetCommandOnMessage)
-FFI_IMPORT_PAD(hookpointAppLoadAppSettings)
+    /* --- HOOKPOINTS PADDING --- */
+    FFI_IMPORT_PAD(hookpointMasterServerHandleOperationRequestJoinGame) FFI_IMPORT_PAD(hookpointMasterServerHandleOperationRequestCreateGame)
+        FFI_IMPORT_PAD(hookpointHandlerBaseHandleENetCommandOnMessage) FFI_IMPORT_PAD(hookpointAppLoadAppSettings)
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 /* --- MULTIPROCESSING IMPORTS --- */
 FFI_IMPORT(void, multiProcessingLaunchIPCChild, (const char *ipc_fd), ipc_fd)
 #else
-FFI_IMPORT_PAD(multiProcessingLaunchProcess)
+            FFI_IMPORT_PAD(multiProcessingLaunchProcess)
 #endif

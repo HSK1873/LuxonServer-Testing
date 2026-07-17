@@ -43,6 +43,7 @@
 #include <typeinfo>
 #include <cstring>
 #include <cstddef>
+#include <luxon/common_codes.hpp>
 #ifdef LUXON_SERVER_ENABLE_COROUTINES
 #include <FfiAwaiter.hpp>
 #endif
@@ -423,32 +424,45 @@ template <unsigned Type>
 static server::Awaitable<server::auth_plugins::registry::AuthResult>
 auth_callback_thunk(server::ServerManager&, const std::string& requested_user_id, const std::string& params, const std::string& data,
                     const std::optional<std::string>& secret, const std::optional<std::string>& auth_url) {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
+    FfiCoroContext ctx(t_coro_stack);
+#endif
+
     char out_user_id[256];
     out_user_id[0] = '\0';
     luxon::ser::Message err_msg{luxon::ser::OperationResponseMessage{}};
-    bool success = false;
+    uint8_t res = 0;
 
     const char *c_secret = secret ? secret->c_str() : nullptr;
     const char *c_auth_url = auth_url ? auth_url->c_str() : nullptr;
 
 #if defined(FFI_WASM) || defined(__wasm__)
-    success = authPluginOnAuthenticate(Type, requested_user_id.c_str(), params.c_str(), data.c_str(), c_secret, c_auth_url, out_user_id, sizeof(out_user_id),
-                                       wrap<SerMessageHandle>(&err_msg));
+    res = authPluginOnAuthenticate(Type, requested_user_id.c_str(), params.c_str(), data.c_str(), c_secret, c_auth_url, out_user_id, sizeof(out_user_id),
+                                   wrap<SerMessageHandle>(&err_msg));
 #else
     if (g_imports.authPluginOnAuthenticate) {
-        success = g_imports.authPluginOnAuthenticate(Type, requested_user_id.c_str(), params.c_str(), data.c_str(), c_secret, c_auth_url, out_user_id,
-                                                     sizeof(out_user_id), wrap<SerMessageHandle>(&err_msg));
+        res = g_imports.authPluginOnAuthenticate(Type, requested_user_id.c_str(), params.c_str(), data.c_str(), c_secret, c_auth_url, out_user_id,
+                                                 sizeof(out_user_id), wrap<SerMessageHandle>(&err_msg));
     } else {
-        lco_return std::unexpected(luxon::ser::OperationResponseMessage{});
+        lco_return std::unexpected(luxon::ser::OperationResponseMessage{.return_code = luxon::ErrorCodes::Core::InternalServerError,
+                                                                        .debug_message = "Authentication handler registered but not implemented"});
     }
 #endif
 
-    if (success) {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
+    ctx.pop();
+
+    if (res == LUXON_AUTH_RESULT_ASYNC)
+        res = co_await basiccoro::ffi_await<uint8_t>([&ctx](void *opaque_handle) { ctx.awaiter_handle = opaque_handle; });
+#endif
+
+    if (res == LUXON_AUTH_RESULT_SUCCESS) {
         lco_return std::string(out_user_id);
     } else {
         if (auto *resp = err_msg.get_if<luxon::ser::OperationResponseMessage>())
             lco_return std::unexpected(*resp);
-        lco_return std::unexpected(luxon::ser::OperationResponseMessage{});
+        lco_return std::unexpected(luxon::ser::OperationResponseMessage{.return_code = luxon::ErrorCodes::Core::InternalServerError,
+                                                                        .debug_message = "Authentication handler did not return an operation response"});
     }
 }
 
