@@ -10,16 +10,20 @@
 #include <utility>
 
 namespace basiccoro {
+
+class DetachedTask;
+
 namespace detail {
 
 template <class Derived> struct PromiseBase {
     std::exception_ptr exception_;
 
     auto get_return_object() noexcept { return std::coroutine_handle<Derived>::from_promise(static_cast<Derived&>(*this)); }
+
     void unhandled_exception() noexcept { exception_ = std::current_exception(); }
 };
 
-template <class Derived, class T> struct ValuePromise : public PromiseBase<Derived> {
+template <class Derived, class T> struct ValuePromise : PromiseBase<Derived> {
     static_assert(std::movable<T>, "T must be movable");
 
     using value_type = T;
@@ -40,24 +44,34 @@ template <class Derived, class T> struct ValuePromise : public PromiseBase<Deriv
     }
 };
 
-template <class Derived> struct ValuePromise<Derived, void> : public PromiseBase<Derived> {
+template <class Derived> struct ValuePromise<Derived, void> : PromiseBase<Derived> {
     using value_type = void;
     void return_void() noexcept {}
 };
 
-template <class T> class AwaitablePromise : public ValuePromise<AwaitablePromise<T>, T> {
+template <class T> class TaskPromise : public ValuePromise<TaskPromise<T>, T> {
 public:
+    enum class DetachResult { detached, completed, already_detached, already_waiting };
+
     auto initial_suspend() noexcept { return std::suspend_never(); }
 
     auto final_suspend() noexcept {
         struct FinalAwaiter {
             bool await_ready() const noexcept { return false; }
 
-            std::coroutine_handle<> await_suspend(std::coroutine_handle<AwaitablePromise> handle) noexcept {
-                auto& promise = handle.promise();
-                void *previous = promise.waiting_.exchange(completedState(), std::memory_order_acq_rel);
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<TaskPromise> handle) noexcept {
+                void *previous = handle.promise().state_.exchange(completedState(), std::memory_order_acq_rel);
 
                 if (!previous || previous == completedState()) {
+                    return std::noop_coroutine();
+                }
+
+                if (previous == detachedState()) {
+                    if (handle.promise().exception_) {
+                        std::terminate();
+                    }
+
+                    handle.destroy();
                     return std::noop_coroutine();
                 }
 
@@ -65,22 +79,27 @@ public:
             }
 
             void await_resume() const noexcept {}
+
+        private:
+            static void *completedState() noexcept { return reinterpret_cast<void *>(1); }
+
+            static void *detachedState() noexcept { return reinterpret_cast<void *>(2); }
         };
 
         return FinalAwaiter{};
     }
 
-    bool completed() const noexcept { return waiting_.load(std::memory_order_acquire) == completedState(); }
+    bool completed() const noexcept { return state_.load(std::memory_order_acquire) == completedState(); }
 
     bool storeWaiting(std::coroutine_handle<> handle) {
         if (!handle) {
-            throw std::runtime_error("AwaitablePromise::storeWaiting(): null handle");
+            throw std::runtime_error("TaskPromise::storeWaiting(): null handle");
         }
 
         void *expected = nullptr;
         void *waiting = handle.address();
 
-        if (waiting_.compare_exchange_strong(expected, waiting, std::memory_order_release, std::memory_order_acquire)) {
+        if (state_.compare_exchange_strong(expected, waiting, std::memory_order_release, std::memory_order_acquire)) {
             return true;
         }
 
@@ -88,13 +107,67 @@ public:
             return false;
         }
 
-        throw std::runtime_error("AwaitablePromise::storeWaiting(): already waiting");
+        if (expected == detachedState()) {
+            throw std::runtime_error("TaskPromise::storeWaiting(): task is detached");
+        }
+
+        throw std::runtime_error("TaskPromise::storeWaiting(): already waiting");
+    }
+
+    DetachResult detach() noexcept {
+        void *expected = nullptr;
+
+        if (state_.compare_exchange_strong(expected, detachedState(), std::memory_order_acq_rel, std::memory_order_acquire)) {
+            return DetachResult::detached;
+        }
+
+        if (expected == completedState()) {
+            return DetachResult::completed;
+        }
+
+        if (expected == detachedState()) {
+            return DetachResult::already_detached;
+        }
+
+        return DetachResult::already_waiting;
     }
 
 private:
     static void *completedState() noexcept { return reinterpret_cast<void *>(1); }
 
-    std::atomic<void *> waiting_ = nullptr;
+    static void *detachedState() noexcept { return reinterpret_cast<void *>(2); }
+
+    // nullptr         -> running, no waiter, still owned by Task
+    // waiter address  -> one coroutine is awaiting this task
+    // completedState  -> finished, result/exception available
+    // detachedState   -> no owner; final_suspend must self-destroy
+    std::atomic<void *> state_ = nullptr;
+};
+
+class DetachedPromise {
+public:
+    DetachedTask get_return_object() noexcept;
+
+    auto initial_suspend() noexcept { return std::suspend_never(); }
+
+    auto final_suspend() noexcept {
+        struct FinalAwaiter {
+            bool await_ready() const noexcept { return false; }
+
+            void await_suspend(std::coroutine_handle<DetachedPromise> handle) noexcept { handle.destroy(); }
+
+            void await_resume() const noexcept {}
+        };
+
+        return FinalAwaiter{};
+    }
+
+    void return_void() noexcept {}
+
+    [[noreturn]]
+    void unhandled_exception() noexcept {
+        std::terminate();
+    }
 };
 
 template <class Promise> class TaskBase {
@@ -137,8 +210,8 @@ protected:
 
 } // namespace detail
 
-template <class T> class [[nodiscard]] AwaitableTask : public detail::TaskBase<detail::AwaitablePromise<T>> {
-    using Base = detail::TaskBase<detail::AwaitablePromise<T>>;
+template <class T = void> class [[nodiscard]] Task : public detail::TaskBase<detail::TaskPromise<T>> {
+    using Base = detail::TaskBase<detail::TaskPromise<T>>;
 
 public:
     using promise_type = typename Base::promise_type;
@@ -164,7 +237,7 @@ public:
 
         template <class Promise> bool await_suspend(std::coroutine_handle<Promise> handle) {
             if (!handle_) {
-                throw std::runtime_error("AwaitableTask::awaiter::await_suspend(): no coroutine");
+                throw std::runtime_error("Task::awaiter::await_suspend(): no coroutine");
             }
 
             return handle_.promise().storeWaiting(handle);
@@ -172,7 +245,7 @@ public:
 
         T await_resume() {
             if (!handle_) {
-                throw std::runtime_error("AwaitableTask::awaiter::await_resume(): no coroutine");
+                throw std::runtime_error("Task::awaiter::await_resume(): no coroutine");
             }
 
             auto& promise = handle_.promise();
@@ -183,7 +256,7 @@ public:
 
             if constexpr (!std::is_same_v<void, T>) {
                 if (!promise.val_) {
-                    throw std::runtime_error("AwaitableTask::awaiter::await_resume(): no value");
+                    throw std::runtime_error("Task::awaiter::await_resume(): no value");
                 }
 
                 T value = std::move(*promise.val_);
@@ -201,6 +274,45 @@ public:
 
     awaiter operator co_await() const& = delete;
     awaiter operator co_await() const&& = delete;
+
+    void detach() & { detachImpl(); }
+    void detach() && { detachImpl(); }
+
+    void detach() const& = delete;
+    void detach() const&& = delete;
+
+private:
+    void detachImpl() {
+        auto handle = this->release();
+        if (!handle) {
+            return;
+        }
+
+        switch (handle.promise().detach()) {
+        case promise_type::DetachResult::detached:
+            return; // final_suspend will self-destroy
+
+        case promise_type::DetachResult::completed:
+            if (handle.promise().exception_) {
+                std::terminate();
+            }
+            handle.destroy();
+            return;
+
+        case promise_type::DetachResult::already_detached:
+            throw std::runtime_error("Task::detach(): already detached");
+
+        case promise_type::DetachResult::already_waiting:
+            throw std::runtime_error("Task::detach(): already being awaited");
+        }
+    }
 };
+
+class DetachedTask {
+public:
+    using promise_type = detail::DetachedPromise;
+};
+
+inline DetachedTask detail::DetachedPromise::get_return_object() noexcept { return {}; }
 
 } // namespace basiccoro

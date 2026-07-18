@@ -7,7 +7,7 @@
 
 #define lco_return co_return
 #define lco_await co_await
-#define lco_background(...) ((void)(__VA_ARGS__))
+#define lco_background(...) ((__VA_ARGS__).detach())
 #else
 #define lco_return return
 #define lco_await
@@ -18,7 +18,7 @@ namespace server {
 template <typename T = void>
 using Awaitable =
 #ifdef LUXON_SERVER_ENABLE_COROUTINES
-    basiccoro::AwaitableTask<T>;
+    basiccoro::Task<T>;
 #else
     T;
 #endif
