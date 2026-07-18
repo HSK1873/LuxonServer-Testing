@@ -5,15 +5,16 @@
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
+#include <utility>
 
 namespace basiccoro {
 namespace detail {
 
 template <class Event> class AwaiterBase {
 public:
-    AwaiterBase(Event& event) : event_(event) {}
+    explicit AwaiterBase(Event& event) noexcept : event_(event) {}
 
-    bool await_ready() {
+    bool await_ready() noexcept {
         if (event_.isSet()) {
             // unset already set event, then continue coroutine
             event_.isSet_ = false;
@@ -40,14 +41,20 @@ private:
 
 class SingleEventBase {
 public:
-    SingleEventBase() = default;
+    SingleEventBase() noexcept = default;
+
     SingleEventBase(const SingleEventBase&) = delete;
-    SingleEventBase(SingleEventBase&&);
+    SingleEventBase(SingleEventBase&&) noexcept;
+
     SingleEventBase& operator=(const SingleEventBase&) = delete;
-    SingleEventBase& operator=(SingleEventBase&&);
+    SingleEventBase& operator=(SingleEventBase&&) noexcept;
+
     ~SingleEventBase();
 
-    bool isSet() const { return isSet_; }
+    [[nodiscard]]
+    bool isSet() const noexcept {
+        return isSet_;
+    }
 
 protected:
     void set_common();
@@ -60,7 +67,7 @@ private:
 
 } // namespace detail
 
-template <class T> class SingleEvent : public detail::SingleEventBase {
+template <class T> class [[nodiscard]] SingleEvent : public detail::SingleEventBase {
 public:
     using value_type = T;
     using awaiter = detail::AwaiterBase<SingleEvent<T>>;
@@ -69,20 +76,22 @@ public:
         result = std::move(t);
         set_common();
     }
-    awaiter operator co_await() { return awaiter{*this}; }
+
+    awaiter operator co_await() noexcept { return awaiter{*this}; }
 
 private:
     friend awaiter;
     std::optional<T> result;
 };
 
-template <> class SingleEvent<void> : public detail::SingleEventBase {
+template <> class [[nodiscard]] SingleEvent<void> : public detail::SingleEventBase {
 public:
     using value_type = void;
     using awaiter = detail::AwaiterBase<SingleEvent<void>>;
 
     void set() { set_common(); }
-    awaiter operator co_await();
+
+    awaiter operator co_await() noexcept;
 };
 
 } // namespace basiccoro

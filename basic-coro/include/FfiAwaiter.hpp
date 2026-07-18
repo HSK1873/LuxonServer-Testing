@@ -18,11 +18,16 @@ public:
     // Called automatically by compiler when coroutine suspends
     template <class Promise> void await_suspend(std::coroutine_handle<Promise> handle) {
         coro_ = handle;
-        initiator_(static_cast<void *>(this));
+        auto init = std::move(initiator_);
+        init(static_cast<void *>(this));
     }
 
     // Called when coroutine resumes to unpack result
     T await_resume() {
+        if (cancelled_) {
+            throw std::runtime_error("FfiAwaiter: task was cancelled");
+        }
+
         if constexpr (!std::is_same_v<T, void>) {
             if (!result_) {
                 throw std::runtime_error("FfiAwaiter: no value in result_");
@@ -44,8 +49,10 @@ public:
     // Static utility to destroy coroutine if FFI drops task
     static void cancel(void *opaque_handle) {
         auto *self = static_cast<FfiAwaiter *>(opaque_handle);
+        self->cancelled_ = true;
+
         if (self->coro_ && !self->coro_.done()) {
-            self->coro_.destroy();
+            self->coro_.resume();
         }
     }
 
@@ -53,6 +60,7 @@ private:
     Initiator initiator_;
     std::coroutine_handle<> coro_ = nullptr;
     std::optional<T> result_;
+    bool cancelled_ = false;
 };
 
 // Specialization for void returns (matches SingleEvent<void> pattern)
@@ -64,10 +72,15 @@ public:
 
     template <class Promise> void await_suspend(std::coroutine_handle<Promise> handle) {
         coro_ = handle;
-        initiator_(static_cast<void *>(this));
+        auto init = std::move(initiator_);
+        init(static_cast<void *>(this));
     }
 
-    void await_resume() {}
+    void await_resume() {
+        if (cancelled_) {
+            throw std::runtime_error("FfiAwaiter: task was cancelled");
+        }
+    }
 
     static void resume(void *opaque_handle) {
         auto *self = static_cast<FfiAwaiter *>(opaque_handle);
@@ -76,9 +89,19 @@ public:
         }
     }
 
+    static void cancel(void *opaque_handle) {
+        auto *self = static_cast<FfiAwaiter *>(opaque_handle);
+        self->cancelled_ = true;
+
+        if (self->coro_ && !self->coro_.done()) {
+            self->coro_.resume();
+        }
+    }
+
 private:
     Initiator initiator_;
     std::coroutine_handle<> coro_ = nullptr;
+    bool cancelled_ = false;
 };
 
 // Helper for template deduction, making it easy to invoke inline

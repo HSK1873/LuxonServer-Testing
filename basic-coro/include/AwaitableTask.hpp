@@ -31,32 +31,32 @@ template <class Derived> struct ValuePromise<Derived, void> : public PromiseBase
 
 template <class T> class AwaitablePromise : public ValuePromise<AwaitablePromise<T>, T> {
 public:
-    auto initial_suspend() { return std::suspend_never(); }
+    auto initial_suspend() noexcept { return std::suspend_never(); }
 
     auto final_suspend() noexcept {
-        if (waiting_) {
-            waiting_.resume();
-            if (waiting_.done()) {
-                waiting_.destroy();
-            }
-            waiting_ = nullptr;
-        }
+        struct FinalAwaiter {
+            std::coroutine_handle<> waiting;
 
-        return std::suspend_always();
+            bool await_ready() const noexcept { return false; }
+
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<>) noexcept {
+                if (waiting) {
+                    return waiting;
+                }
+                return std::noop_coroutine();
+            }
+
+            void await_resume() const noexcept {}
+        };
+
+        return FinalAwaiter{waiting_};
     }
 
     void storeWaiting(std::coroutine_handle<> handle) {
         if (waiting_) {
             throw std::runtime_error("AwaitablePromise::storeWaiting(): already waiting");
         }
-
         waiting_ = handle;
-    }
-
-    ~AwaitablePromise() {
-        if (waiting_) {
-            waiting_.destroy();
-        }
     }
 
 private:
@@ -67,52 +67,37 @@ template <class Promise> class TaskBase {
 public:
     using promise_type = Promise;
 
-    TaskBase();
-    TaskBase(std::coroutine_handle<promise_type> handle);
-    TaskBase(const TaskBase&) = delete;
-    TaskBase(TaskBase&&);
-    TaskBase& operator=(const TaskBase&) = delete;
-    TaskBase& operator=(TaskBase&&);
-    ~TaskBase();
+    TaskBase() noexcept = default;
 
-    bool done() const { return handle_.done(); }
+    TaskBase(std::coroutine_handle<promise_type> handle) noexcept : handle_(handle) {}
+
+    TaskBase(const TaskBase&) = delete;
+
+    TaskBase(TaskBase&& other) noexcept : handle_(std::exchange(other.handle_, nullptr)) {}
+
+    TaskBase& operator=(const TaskBase&) = delete;
+
+    TaskBase& operator=(TaskBase&& other) noexcept {
+        if (this != &other) {
+            if (handle_) {
+                handle_.destroy();
+            }
+            handle_ = std::exchange(other.handle_, nullptr);
+        }
+        return *this;
+    }
+
+    ~TaskBase() {
+        if (handle_) {
+            handle_.destroy();
+        }
+    }
+
+    bool done() const { return !handle_ || handle_.done(); }
 
 protected:
-    std::coroutine_handle<promise_type> handle_;
-    bool handleShouldBeDestroyed_;
+    std::coroutine_handle<promise_type> handle_ = nullptr;
 };
-
-template <class Promise> TaskBase<Promise>::TaskBase() : handle_(nullptr), handleShouldBeDestroyed_(false) {}
-
-template <class Promise> TaskBase<Promise>::TaskBase(std::coroutine_handle<promise_type> handle) : handle_(handle) {
-    // TODO: this whole system needs revamping with something like UniqueCoroutineHandle
-    // and custom static interface to awaiter types - so await_suspend method would take in UniqueCoroutineHandle
-
-    if (handle.done()) {
-        // it is resonable to expect that if the coroutine is done before
-        // the task creation, then the original stack is continued without suspending,
-        // and coroutine needs to be destroyed with TaskBase object
-        handleShouldBeDestroyed_ = true;
-    } else {
-        // otherwise the coroutine should be managed by object that it is awaiting
-        handleShouldBeDestroyed_ = false;
-    }
-}
-
-template <class Promise>
-TaskBase<Promise>::TaskBase(TaskBase&& other) : handle_(other.handle_), handleShouldBeDestroyed_(std::exchange(other.handleShouldBeDestroyed_, false)) {}
-
-template <class Promise> TaskBase<Promise>& TaskBase<Promise>::operator=(TaskBase&& other) {
-    handle_ = other.handle_;
-    handleShouldBeDestroyed_ = std::exchange(other.handleShouldBeDestroyed_, false);
-    return *this;
-}
-
-template <class Promise> TaskBase<Promise>::~TaskBase() {
-    if (handleShouldBeDestroyed_) {
-        handle_.destroy();
-    }
-}
 
 } // namespace detail
 
@@ -128,7 +113,7 @@ public:
 };
 
 template <class T> struct AwaitableTask<T>::awaiter {
-    bool await_ready() { return task_.done(); }
+    bool await_ready() const noexcept { return task_.done(); }
 
     template <class Promise> void await_suspend(std::coroutine_handle<Promise> handle) { task_.handle_.promise().storeWaiting(handle); }
 
