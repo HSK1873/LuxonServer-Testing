@@ -8,6 +8,8 @@
 
 namespace basiccoro {
 
+struct FfiCancelledException {};
+
 template <class T, class Initiator> class FfiAwaiter {
 public:
     explicit FfiAwaiter(Initiator initiator) : initiator_(std::move(initiator)) {}
@@ -25,7 +27,7 @@ public:
     // Called when coroutine resumes to unpack result
     T await_resume() {
         if (cancelled_) {
-            throw std::runtime_error("FfiAwaiter: task was cancelled");
+            throw FfiCancelledException();
         }
 
         if constexpr (!std::is_same_v<T, void>) {
@@ -63,7 +65,7 @@ private:
     bool cancelled_ = false;
 };
 
-// Specialization for void returns (matches SingleEvent<void> pattern)
+// Specialization for void returns
 template <class Initiator> class FfiAwaiter<void, Initiator> {
 public:
     explicit FfiAwaiter(Initiator initiator) : initiator_(std::move(initiator)) {}
@@ -78,7 +80,7 @@ public:
 
     void await_resume() {
         if (cancelled_) {
-            throw std::runtime_error("FfiAwaiter: task was cancelled");
+            throw FfiCancelledException();
         }
     }
 
