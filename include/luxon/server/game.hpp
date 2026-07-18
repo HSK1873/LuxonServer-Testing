@@ -258,7 +258,8 @@ struct Game : std::enable_shared_from_this<Game> {
     execute_plugin_chain(Awaitable<game_plugins::Result> (game_plugins::PluginBase::*method)(luxon::ser::OperationRequestMessage&, InfoStruct&),
                          luxon::ser::OperationRequestMessage& req, InfoStruct& info) {
         for (const auto& plugin : plugins) {
-            game_plugins::Result result = lco_await((*plugin).*method)(req, info);
+            auto invocation = ((*plugin).*method)(req, info);
+            game_plugins::Result result = lco_await std::move(invocation);
             if (result != game_plugins::Result::Continue)
                 lco_return result;
         }
