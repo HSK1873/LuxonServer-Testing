@@ -695,7 +695,7 @@ int32_t gamePeerGetActorId(GamePeerHandle game_peer) {
 bool gamePeerHasInterestGroup(GamePeerHandle game_peer, uint8_t group) {
     return ffi_safe_call<bool>(false, [=] {
         auto *gp = unwrap<server::GamePeer>(game_peer);
-        return gp ? gp->has_interest_group(group) : false;
+        return gp ? gp->interest_groups.test(group) : false;
     });
 }
 

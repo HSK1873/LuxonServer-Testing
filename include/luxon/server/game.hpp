@@ -53,14 +53,36 @@ struct GameInfo {
     bool has_game_info() const { return lobby.has_lobby_info() && !id.empty(); }
 };
 
+struct InterestGroups {
+    std::bitset<256> bitset_{1};
+
+    bool test(uint8_t v) const {
+        if (v == 0)
+            return true;
+
+        return bitset_.test(v);
+    }
+
+    void set(uint8_t v, bool enable = true) { bitset_.set(v, enable); }
+    void set() { bitset_.set(); }
+
+    void reset(uint8_t v) { bitset_.reset(v); }
+    void reset() { bitset_.reset(); }
+
+    std::string to_string() const {
+        auto bs = bitset_;
+        bs.set(0);
+        return bs.to_string();
+    }
+};
+
 struct GamePeer {
     std::weak_ptr<Peer> peer;
     int32_t actor_id{};
     ser::Hashtable actor_props;
-    std::bitset<256> interest_groups{1};
+    InterestGroups interest_groups;
 
     bool is_valid() const { return actor_id > 0; }
-    bool has_interest_group(uint8_t group) const;
     bool disconnect();
 };
 

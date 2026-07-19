@@ -21,13 +21,6 @@ void GameInfo::encode_game_info(ser::ParameterList& params) const {
     lobby.encode_lobby_info(params);
 }
 
-bool GamePeer::has_interest_group(uint8_t group) const {
-    if (group == 0)
-        return true;
-
-    return interest_groups.test(group);
-}
-
 bool GamePeer::disconnect() {
     if (auto peer_ = peer.lock()) {
         peer_->disconnect();
@@ -312,14 +305,14 @@ void Game::broadcast_event(Event& event) {
         if (*receiver_group == ReceiverGroup::MasterClient) {
             // Send to master client
             if (auto *game_peer = find_peer(master_actor))
-                if (game_peer->has_interest_group(event.interest_group))
+                if (game_peer->interest_groups.test(event.interest_group))
                     dispatch(*game_peer);
         } else {
             // Send to others (or all)
             for (auto& game_peer : peers) {
                 if (*receiver_group == ReceiverGroup::Others && game_peer.actor_id == event.sender_actor_id)
                     continue;
-                if (!game_peer.has_interest_group(event.interest_group))
+                if (!game_peer.interest_groups.test(event.interest_group))
                     continue;
                 dispatch(game_peer);
             }
@@ -330,7 +323,7 @@ void Game::broadcast_event(Event& event) {
             auto *game_peer = find_peer(actor_id);
             if (!game_peer)
                 continue;
-            if (!game_peer->has_interest_group(event.interest_group))
+            if (!game_peer->interest_groups.test(event.interest_group))
                 continue;
             dispatch(*game_peer);
         }
