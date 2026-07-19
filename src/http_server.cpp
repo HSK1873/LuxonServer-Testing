@@ -249,8 +249,7 @@ void HttpServer::service_now() {
     if (server_fd_ == -1)
         return;
 
-    if (std::ranges::contains(servicable_fds_, server_fd_))
-    {
+    if (std::ranges::contains(servicable_fds_, server_fd_)) {
         sockaddr_in cli_addr;
         socklen_t clilen = sizeof(cli_addr);
         socket_t new_fd = accept(server_fd_, reinterpret_cast<struct sockaddr *>(&cli_addr), &clilen);
@@ -337,6 +336,17 @@ void HttpServer::handle_client_data(HttpClient& client) {
 
     const luxon::HttpRequest req = result.value();
     try {
+        if (req.method == "POST" && req.path == "/batch") {
+            try {
+                json batch_req = json::parse(req.body);
+                json batch_res = execute_batch(batch_req);
+                send_json_response(client, 200, batch_res);
+            } catch (const json::exception& e) {
+                send_error(client, 400, "Invalid JSON payload");
+            }
+            return;
+        }
+
         std::string_view content, content_type = "text/html";
         if (req.method == "GET") {
 #ifdef LUXON_ENET_ENABLE_METRICS
@@ -501,6 +511,117 @@ std::string HttpServer::generate_prometheus_metrics() {
 }
 
 #endif
+
+json HttpServer::execute_batch(const json& batch_req) {
+    ZoneScoped;
+
+    json results = json::array();
+    json responses = json::array();
+
+    if (!batch_req.contains("steps") || !batch_req["steps"].is_array()) {
+        throw std::invalid_argument("Batch request must contain a 'steps' array");
+    }
+
+    const auto& steps = batch_req["steps"];
+    for (size_t i = 0; i < steps.size(); ++i) {
+        const auto& step = steps[i];
+        std::string method = step.value("method", "GET");
+        std::string raw_path = step.at("path").get<std::string>();
+
+        try {
+            // Extract all template strings
+            std::vector<std::string> templates;
+            size_t start_pos = 0;
+            while ((start_pos = raw_path.find("{$steps", start_pos)) != std::string::npos) {
+                size_t end_pos = raw_path.find('}', start_pos);
+                if (end_pos == std::string::npos)
+                    break;
+                templates.push_back(raw_path.substr(start_pos, end_pos - start_pos + 1));
+                start_pos = end_pos + 1;
+            }
+
+            // Expand paths for wildcards
+            std::vector<std::string> paths_to_execute = {raw_path};
+
+            for (const auto& tmpl : templates) {
+                std::string ptr_str = tmpl.substr(7, tmpl.length() - 8);
+                size_t wildcard_pos = ptr_str.find("/*");
+
+                std::vector<std::string> new_paths;
+
+                if (wildcard_pos != std::string::npos) {
+                    // Split pointer: Base ("/0") and Sub ("/id")
+                    std::string base_ptr = ptr_str.substr(0, wildcard_pos);
+                    std::string sub_ptr = ptr_str.substr(wildcard_pos + 2);
+
+                    const json& base_arr = results.at(json::json_pointer(base_ptr));
+                    if (!base_arr.is_array())
+                        throw std::invalid_argument("Wildcard base must be an array");
+
+                    // Generate new path for every item in array
+                    for (const auto& item : base_arr) {
+                        const json& val = sub_ptr.empty() ? item : item.at(json::json_pointer(sub_ptr));
+                        std::string resolved_val = val.is_string() ? val.get<std::string>() : val.dump();
+
+                        for (const auto& p : paths_to_execute) {
+                            std::string next_path = p;
+                            size_t pos = next_path.find(tmpl);
+                            if (pos != std::string::npos)
+                                next_path.replace(pos, tmpl.length(), resolved_val);
+                            new_paths.push_back(next_path);
+                        }
+                    }
+                } else {
+                    // Standard replacement
+                    const json& val = results.at(json::json_pointer(ptr_str));
+                    std::string resolved_val = val.is_string() ? val.get<std::string>() : val.dump();
+
+                    for (const auto& p : paths_to_execute) {
+                        std::string next_path = p;
+                        size_t pos = next_path.find(tmpl);
+                        if (pos != std::string::npos)
+                            next_path.replace(pos, tmpl.length(), resolved_val);
+                        new_paths.push_back(next_path);
+                    }
+                }
+
+                // Prevent nested wildcards from causing a cartesian explosion
+                if (new_paths.size() > 50)
+                    throw std::runtime_error("Batch fan-out limit exceeded (max 50)");
+                paths_to_execute = std::move(new_paths);
+            }
+
+            // Execute all generated paths
+            json step_result;
+            if (paths_to_execute.size() == 1) {
+                step_result = route_request(method, paths_to_execute[0]);
+            } else {
+                step_result = json::array();
+                for (const auto& p : paths_to_execute) {
+                    json res = route_request(method, p);
+
+                    // Flatten arrays so downstream steps remain 1D
+                    if (res.is_array()) {
+                        for (const auto& item : res)
+                            step_result.push_back(item);
+                    } else {
+                        step_result.push_back(res);
+                    }
+                }
+            }
+
+            results.push_back(step_result);
+            responses.push_back({{"step", i}, {"status", 200}, {"body", step_result}});
+
+        } catch (const std::exception& e) {
+            responses.push_back({{"step", i}, {"status", 500}, {"error", e.what()}});
+            break; // Cancel on failure
+        }
+    }
+
+    return responses;
+}
+
 json HttpServer::route_request(std::string_view method, std::string path) {
     ZoneScoped;
 

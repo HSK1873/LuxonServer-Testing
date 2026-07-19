@@ -75,6 +75,7 @@ private:
 
 #endif
     // Routing
+    nlohmann::json execute_batch(const nlohmann::json& batch_req);
     nlohmann::json route_request(std::string_view method, std::string path);
 
     // Data helpers
