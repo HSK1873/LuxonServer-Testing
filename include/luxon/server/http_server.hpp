@@ -9,6 +9,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <chrono>
 #include <functional>
 #ifdef _WIN32
 #include <winsock2.h>
@@ -43,6 +44,9 @@ public:
     void service_now();
 
 private:
+    constexpr static size_t MAX_PAYLOAD_SIZE = 64 * 1024; // 64KB
+    constexpr static size_t MAX_CLIENTS = 256;
+
     struct HttpClient {
         socket_t fd = -1;
         std::string request_buffer;
@@ -50,6 +54,7 @@ private:
         bool mark_for_delete = false;
         bool close_after_write = false;
         bool shutdown_sent = false;
+        std::chrono::steady_clock::time_point last_activity;
     };
 
     ServerManager& server_manager_;

@@ -249,14 +249,19 @@ void HttpServer::service_now() {
     if (server_fd_ == -1)
         return;
 
-    if (std::ranges::contains(servicable_fds_, server_fd_)) {
-        sockaddr_in cli_addr;
-        socklen_t clilen = sizeof(cli_addr);
-        socket_t new_fd = accept(server_fd_, reinterpret_cast<struct sockaddr *>(&cli_addr), &clilen);
-        if (new_fd >= 0) {
-            set_nonblocking(new_fd);
-            clients_.push_back({new_fd, "", "", false, false});
-            on_create_fd(new_fd);
+    const auto now = std::chrono::steady_clock::now();
+    constexpr auto IDLE_TIMEOUT = std::chrono::seconds(30);
+
+    if (clients_.size() < MAX_CLIENTS) {
+        if (std::ranges::contains(servicable_fds_, server_fd_)) {
+            sockaddr_in cli_addr;
+            socklen_t clilen = sizeof(cli_addr);
+            socket_t new_fd = accept(server_fd_, reinterpret_cast<struct sockaddr *>(&cli_addr), &clilen);
+            if (new_fd >= 0) {
+                set_nonblocking(new_fd);
+                clients_.push_back({new_fd, "", "", false, false, false, now});
+                on_create_fd(new_fd);
+            }
         }
     }
 
@@ -264,12 +269,25 @@ void HttpServer::service_now() {
         if (client.mark_for_delete)
             continue;
 
+        if (now - client.last_activity > IDLE_TIMEOUT) {
+            log_->warn("Client timed out (fd: {})", client.fd);
+            client.mark_for_delete = true;
+            continue;
+        }
+
         // Handle Incoming Data
         if (std::ranges::contains(servicable_fds_, client.fd)) {
             char buffer[4096];
             const int n = recv(client.fd, buffer, sizeof(buffer), 0);
 
             if (n > 0) {
+                client.last_activity = now;
+
+                if (client.request_buffer.size() + n > MAX_PAYLOAD_SIZE) {
+                    send_error(client, 413, "Payload Too Large");
+                    client.close_after_write = true;
+                    continue;
+                }
                 client.request_buffer.append(buffer, n);
                 // Only parse if we haven't decided to close yet
                 if (!client.close_after_write && client.request_buffer.find("\r\n\r\n") != std::string::npos) {
@@ -288,6 +306,7 @@ void HttpServer::service_now() {
         if (!client.write_buffer.empty()) {
             int sent = send(client.fd, client.write_buffer.data(), client.write_buffer.size(), 0);
             if (sent > 0) {
+                client.last_activity = now;
                 client.write_buffer.erase(0, sent);
             } else if (sent < 0 && errno != EWOULDBLOCK && errno != EAGAIN) {
                 client.mark_for_delete = true;
@@ -523,6 +542,10 @@ json HttpServer::execute_batch(const json& batch_req) {
     }
 
     const auto& steps = batch_req["steps"];
+    if (steps.size() > 25) {
+        throw std::invalid_argument("Batch limit exceeded (max 25 steps)");
+    }
+
     for (size_t i = 0; i < steps.size(); ++i) {
         const auto& step = steps[i];
         std::string method = step.value("method", "GET");
