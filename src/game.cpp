@@ -7,6 +7,7 @@
 #include "server_manager.hpp"
 #include "peer_persistence.hpp"
 #include "ipc_codes.hpp"
+#include "coro_support.hpp"
 
 #include <luxon/ser_interface.hpp>
 #include <luxon/common_codes.hpp>
@@ -69,7 +70,7 @@ std::expected<ser::ByteArray, ser::Error> Event::get_cached_data(ser::IProtocol&
 
 Game::~Game() {
     // Call into plugins
-    GAME_PLUGINS_INVOKE({
+    GAME_PLUGINS_INVOKE({}, {
         OnCloseGameCallInfo info{.failed_on_create = !is_created};
         execute_plugin_chain(&PluginBase::OnCloseGame, info);
     });
@@ -221,11 +222,10 @@ restart:
             lobby->app->server_manager.add_scheduled_task(empty_game_ttl, [game = shared_from_this()]() {});
 
         // Call into plugins
-        GAME_PLUGINS_INVOKE({
+        GAME_PLUGINS_INVOKE({}, {
             BeforeCloseGameCallInfo info{.failed_on_create = !is_created};
             execute_plugin_chain(&PluginBase::BeforeCloseGame, info);
-        })
-        true;
+        });
     } else if (leaving_actor_id == master_actor) {
         // Lobby is not empty yet, but there's no master assigned anymore, so assign a new one
         master_actor = peers.front().actor_id;

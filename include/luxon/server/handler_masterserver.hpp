@@ -6,6 +6,7 @@
 #include "global.hpp"
 #include "handler_base.hpp"
 #include "lobby.hpp"
+#include "coro_support.hpp"
 
 #include <unordered_set>
 #include <functional>
@@ -22,7 +23,7 @@ public:
     using HandlerBase::HandlerBase;
 
     void HandleSlowUpdate() override;
-    void HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) override;
+    Awaitable<> HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) override;
 
     std::shared_ptr<Lobby> get_joined_lobby() {
         if (!joined_lobby_.has_value())

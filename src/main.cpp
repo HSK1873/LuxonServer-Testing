@@ -23,6 +23,7 @@
 #ifdef __linux__
 #include <csignal>
 #include <sys/prctl.h>
+#include <linux/limits.h>
 #endif
 #endif
 

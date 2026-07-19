@@ -46,10 +46,10 @@ App::App(ServerManager& server_manager, std::string_view id, std::string_view ve
 
 bool App::load_app_settings() {
     // Get settings
-    const bool fres = [this]() {
+    const bool fres = [this]() -> bool {
         // Try hookpoint
         bool hookpoint_success = true;
-        LUXON_SERVER_HOOKPOINT_CSM(server_manager, App_load_app_settings, settings_, hookpoint_success) hookpoint_success;
+        LUXON_SERVER_HOOKPOINT_CSM_SYNC(server_manager, App_load_app_settings, settings_, hookpoint_success) hookpoint_success;
 
         // Try database
 #ifdef LUXON_SERVER_ENABLE_SETTINGS_DATABASE
@@ -118,6 +118,18 @@ std::shared_ptr<Lobby> App::get_lobby(LobbyId id) {
     });
     lobbies_[{fres->name, fres->type}] = fres;
     return fres;
+}
+
+std::shared_ptr<App> App::try_get(ServerManager& server_manager, const std::string& id, const std::string& version) {
+    ZoneScoped;
+    if (auto res = server_manager.apps.find({id, version}); res != server_manager.apps.end()) {
+        if (auto fres = res->second.lock())
+            return fres;
+        else
+            server_manager.apps.erase(res);
+    }
+
+    return nullptr;
 }
 
 std::shared_ptr<App> App::get(ServerManager& server_manager, const std::string& id, const std::string& version) {

@@ -5,6 +5,7 @@
 
 #include "global.hpp"
 #include "peer.hpp"
+#include "coro_support.hpp"
 
 #include <memory>
 #include <luxon/ser_types.hpp>
@@ -21,15 +22,16 @@ public:
     HandlerBase(ServerManager& server_manager, std::shared_ptr<Peer> peer) : server_manager_(server_manager), peer_(std::move(peer)), proto_(peer_->protocol) {}
     virtual ~HandlerBase();
 
-    virtual void HandleConnect();
-    virtual void HandleDisconnect();
+    virtual Awaitable<> HandleConnect();
+    virtual Awaitable<> HandleDisconnect();
     virtual void HandleSlowUpdate();
-    virtual void HandleENetConnectionStateChange(enet::EnetConnectionState state);
-    virtual void HandleENetCommand(enet::EnetCommand&& cmd);
-    virtual void HandleHTTPRequest(HttpRequest&& request, const enet::EnetCommandHeader& cmd_header);
-    virtual void HandleInitRequest(ser::InitMessage&& req, const enet::EnetCommandHeader& cmd_header);
-    virtual void HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header);
-    virtual void HandleInternalOperationRequest(ser::InternalOperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header);
+    virtual Awaitable<> HandleENetConnectionStateChange(enet::EnetConnectionState state);
+    virtual Awaitable<> HandleENetCommand(enet::EnetCommand&& cmd);
+    virtual Awaitable<> HandleHTTPRequest(HttpRequest&& request, const enet::EnetCommandHeader& cmd_header);
+    virtual Awaitable<> HandleInitRequest(ser::InitMessage&& req, const enet::EnetCommandHeader& cmd_header);
+    virtual Awaitable<> HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header);
+    virtual Awaitable<> HandleInternalOperationRequest(ser::InternalOperationRequestMessage&& req, bool is_encrypted,
+                                                       const enet::EnetCommandHeader& cmd_header);
 
     const std::shared_ptr<Peer>& get_peer() const { return peer_; }
     ServerManager& get_server_manager() const { return server_manager_; }

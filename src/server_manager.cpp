@@ -54,6 +54,7 @@
 #include "handler_nameserver.hpp"
 #include "handler_masterserver.hpp"
 #include "handler_gameserver.hpp"
+#include "coro_support.hpp"
 #include "yaml.hpp"
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 #include "ipc_codes.hpp"
@@ -687,6 +688,9 @@ bool ServerManager::run_once() {
 }
 
 std::shared_ptr<App> ServerManager::get_app(const AppInfo& info) { return App::get(*this, std::string(info.id), std::string(info.version)); }
+
+std::shared_ptr<App> ServerManager::try_get_app(const AppInfo& info) { return App::try_get(*this, std::string(info.id), std::string(info.version)); }
+
 std::shared_ptr<Lobby> ServerManager::get_lobby(App& app, const LobbyInfo& info) { return app.get_lobby(info); }
 std::expected<std::shared_ptr<Game>, std::string> ServerManager::get_game(Lobby& lobby, const GameInfo& info) {
     auto game = lobby.create_game(std::string(info.id), info.server_address, true);
@@ -954,63 +958,69 @@ void ServerManager::setup() {
             };
 
             enetPeer->on_state_changed = [this, handler = raw_handler](enet::EnetConnectionState state) {
-                try {
-                    handler->HandleENetConnectionStateChange(state);
-                } catch (const std::exception& e) {
-                    auto& peer = *handler->get_peer();
-                    peer.log->warn("Uncaught exception in ENet connect state change handler: {}", e.what());
-                }
+                lco_background([](ServerManager& self, enet::EnetConnectionState state, server::HandlerBase *handler) -> Awaitable<> {
+                    try {
+                        lco_await handler->HandleENetConnectionStateChange(state);
+                    } catch (const std::exception& e) {
+                        auto& peer = *handler->get_peer();
+                        peer.log->warn("Uncaught exception in ENet connect state change handler: {}", e.what());
+                    }
 
-                if (state == luxon::enet::EnetConnectionState::Connected)
-                    handler->HandleConnect();
+                    if (state == luxon::enet::EnetConnectionState::Connected)
+                        lco_await handler->HandleConnect();
 
-                if (state == enet::EnetConnectionState::Disconnected) {
-                    handler->HandleDisconnect();
-                    // Self-destruct handler, this will invalidate the pointer
-                    add_scheduled_task(0, [this, handler]() { connections_.remove_if([handler](auto& v) { return v.get() == handler; }); });
-                }
+                    if (state == enet::EnetConnectionState::Disconnected) {
+                        lco_await handler->HandleDisconnect();
+                        // Self-destruct handler, this will invalidate the pointer
+                        self.add_scheduled_task(0, [&self, handler]() { self.connections_.remove_if([handler](auto& v) { return v.get() == handler; }); });
+                    }
+                }(*this, state, handler));
             };
 
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
-            enetPeer->on_payload_command = [this, handler_weak = std::weak_ptr<HandlerBase>(handler_ptr)](enet::EnetCommand&& cmd) {
-                auto handler = handler_weak.lock();
-                if (!handler)
-                    return;
+            enetPeer->on_payload_command = [this, handler_capture = std::weak_ptr<HandlerBase>(handler_ptr)](enet::EnetCommand&& cmd) {
+                lco_background([](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
+                    auto handler = h_token.lock();
+                    if (!handler)
+                        lco_return;
 #else
-            enetPeer->on_payload_command = [this, handler = handler_ptr](enet::EnetCommand&& cmd) {
+            enetPeer->on_payload_command = [this, handler_capture = handler_ptr](enet::EnetCommand&& cmd) {
+                lco_background([](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
+                    auto *handler = h_token;
 #endif
-                auto& peer = handler->get_peer();
+                    auto& peer = handler->get_peer();
 
 #ifndef NDEBUG
-                peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
-                                 cmd.header.channel_id);
-                if (!visualizer::print_ser_message(cmd.get_payload(), 2, *peer->protocol)) {
-                    if (!visualizer::print_http_message(cmd.get_payload(), 2)) {
-                        peer->log->error("Message not understood!");
-                        visualizer::helpers::print_hex_dump(cmd.get_payload(), 2);
+                    peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
+                                     cmd.header.channel_id);
+                    if (!visualizer::print_ser_message(cmd.get_payload(), 2, *peer->protocol)) {
+                        if (!visualizer::print_http_message(cmd.get_payload(), 2)) {
+                            peer->log->error("Message not understood!");
+                            visualizer::helpers::print_hex_dump(cmd.get_payload(), 2);
+                        }
                     }
-                }
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
-                active_command_restarter_ = CommandRestarter::create(handler, cmd);
-                active_command_restarter_allowed_ = true;
-                inside_command_ = true;
+                    self.active_command_restarter_ = CommandRestarter::create(handler, cmd);
+                    self.active_command_restarter_allowed_ = true;
+                    self.inside_command_ = true;
 #endif
-                try {
-                    handler->HandleENetCommand(std::move(cmd));
-                } catch (const std::exception& e) {
-                    peer->log->critical("Disconnecting due to uncaught exception in ENet command handler: {}", e.what());
-                    peer->disconnect();
-                }
+                    try {
+                        lco_await handler->HandleENetCommand(std::move(cmd));
+                    } catch (const std::exception& e) {
+                        peer->log->critical("Disconnecting due to uncaught exception in ENet command handler: {}", e.what());
+                        peer->disconnect();
+                    }
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
-                inside_command_ = false;
-                if (active_command_restarter_allowed_ && !should_abort_active_command()) {
-                    peer->log->warn("Command did not commit!");
-                    mark_command_committed();
-                }
-                active_command_restarter_.reset();
+                    self.inside_command_ = false;
+                    if (self.active_command_restarter_allowed_ && !self.should_abort_active_command()) {
+                        peer->log->warn("Command did not commit!");
+                        self.mark_command_committed();
+                    }
+                    self.active_command_restarter_.reset();
 #endif
+                }(*this, std::move(cmd), std::move(handler_capture)));
             };
 
             // Add to connection list

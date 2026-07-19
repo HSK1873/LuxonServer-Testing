@@ -4,6 +4,7 @@
 #pragma once
 
 #include "global.hpp"
+#include "coro_support.hpp"
 
 #include <luxon/enet_protocol.hpp>
 #include <luxon/ser_types.hpp>
@@ -20,6 +21,6 @@ struct AuthProviderSettings {
     std::optional<std::string> secret, auth_url;
 };
 
-ser::OperationResponseMessage authenticate(ServerManager& server_manager, Peer& peer, const ser::OperationRequestMessage& req,
-                                           const enet::EnetCommandHeader& cmd_header, bool refresh_token = true);
+Awaitable<ser::OperationResponseMessage> authenticate(ServerManager& server_manager, Peer& peer, const ser::OperationRequestMessage& req,
+                                                      const enet::EnetCommandHeader& cmd_header, bool refresh_token = true);
 } // namespace server

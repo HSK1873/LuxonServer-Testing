@@ -7,6 +7,7 @@
 #include "apps.hpp"
 #include "lobby.hpp"
 #include "peer.hpp"
+#include "coro_support.hpp"
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
 #include "game_plugin_base.hpp"
 #endif
@@ -24,13 +25,12 @@
 #include <luxon/enet_peer.hpp>
 
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
-#define GAME_PLUGINS_INVOKE(...)                                                                                                                               \
+#define GAME_PLUGINS_INVOKE(returner, ...)                                                                                                                     \
     {                                                                                                                                                          \
         using namespace game_plugins;                                                                                                                          \
         __VA_ARGS__                                                                                                                                            \
     }                                                                                                                                                          \
-    if (get_server_manager().should_abort_active_command())                                                                                                    \
-    return
+    if (get_server_manager().should_abort_active_command())
 #else
 #define GAME_PLUGINS_INVOKE(...)
 #endif
@@ -276,15 +276,17 @@ struct Game : std::enable_shared_from_this<Game> {
 
 #ifdef LUXON_SERVER_ENABLE_PLUGINS
     template <typename InfoStruct>
-    game_plugins::Result execute_plugin_chain(game_plugins::Result (game_plugins::PluginBase::*method)(luxon::ser::OperationRequestMessage&, InfoStruct&),
-                                              luxon::ser::OperationRequestMessage& req, InfoStruct& info) {
+    Awaitable<game_plugins::Result>
+    execute_plugin_chain(Awaitable<game_plugins::Result> (game_plugins::PluginBase::*method)(luxon::ser::OperationRequestMessage&, InfoStruct&),
+                         luxon::ser::OperationRequestMessage& req, InfoStruct& info) {
         for (const auto& plugin : plugins) {
-            game_plugins::Result result = ((*plugin).*method)(req, info);
+            auto invocation = ((*plugin).*method)(req, info);
+            game_plugins::Result result = lco_await std::move(invocation);
             if (result != game_plugins::Result::Continue)
-                return result;
+                lco_return result;
         }
 
-        return game_plugins::Result::Continue;
+        lco_return game_plugins::Result::Continue;
     }
 
     template <typename InfoStruct>
