@@ -105,7 +105,7 @@ Awaitable<> HandlerBase::HandleENetCommand(enet::EnetCommand&& cmd) {
         } else {
             // We don't know what this is!
             peer_->log->warn("Invalid packet ({} bytes in length) received: {}", payload.size(), expected_message.error().message);
-#ifndef NDEBUG
+#ifdef LUXON_SERVER_ENABLE_VISUALIZER
             luxon::visualizer::helpers::print_hex_dump(payload, 2);
 #endif
         }
@@ -183,7 +183,7 @@ Awaitable<> HandlerBase::HandleHTTPRequest(HttpRequest&& request, const enet::En
     } else {
         // We don't know what this HTTP request is!
         peer_->log->warn("Invalid HTTP request received");
-#ifndef NDEBUG
+#ifdef LUXON_SERVER_ENABLE_VISUALIZER
         luxon::visualizer::print_http_message(request, 2);
 #endif
     }

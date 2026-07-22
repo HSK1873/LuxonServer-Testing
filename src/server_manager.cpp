@@ -435,7 +435,7 @@ ServerManager::ServerManager(ServerManagerConfig config
         this->parent_ipc_.is_open() ? std::format("Subprocess {} ServerManager", this->parent_ipc_.get_fd()) :
 #endif
                                     "ServerManager");
-#ifndef NDEBUG
+#ifdef LUXON_SERVER_ENABLE_VISUALIZER
     log_->set_level(log_level::trace);
 #endif
 
@@ -923,7 +923,7 @@ void ServerManager::setup() {
             peer->enet_peer = enetPeer;
             peer->log = create_logger(std::format("Peer {}@{}", enetPeer->peer_id(), enetPeer->remote_endpoint()->to_string()));
             peer->protocol = std::make_unique<ser::GpBinaryV18>(); // Default version
-#ifndef NDEBUG
+#ifdef LUXON_SERVER_ENABLE_VISUALIZER
             peer->log->set_level(log_level::trace);
 #endif
             peer->log->info("Peer {} constructed with {} handler", peer->enet_peer->peer_id(), ServerTypeToString(config.type));
@@ -990,7 +990,7 @@ void ServerManager::setup() {
 #endif
                     auto& peer = handler->get_peer();
 
-#ifndef NDEBUG
+#ifdef LUXON_SERVER_ENABLE_VISUALIZER
                     peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
                                      cmd.header.channel_id);
                     if (!visualizer::print_ser_message(cmd.get_payload(), 2, *peer->protocol)) {

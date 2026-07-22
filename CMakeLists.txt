@@ -165,6 +165,9 @@ target_compile_definitions(luxon_server_lib PRIVATE SQLITE_CUSTOM_INCLUDE=sqlite
 target_link_libraries(luxon_server_lib PRIVATE
     $<$<CONFIG:Debug>:luxon_visualizer>
 )
+target_compile_definitions(luxon_server_lib PRIVATE
+    $<$<CONFIG:Debug>:LUXON_SERVER_ENABLE_VISUALIZER>
+)
 
 if (WASI)
     target_link_libraries(luxon_server_lib PUBLIC wasm_sockets)

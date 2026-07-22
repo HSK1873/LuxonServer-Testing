@@ -185,7 +185,7 @@ json photon_val_to_json(const Value& val) {
 
 HttpServer::HttpServer(ServerManager& manager) : server_manager_(manager) {
     log_ = create_logger("HTTPServer");
-#ifndef NDEBUG
+#ifdef LUXON_SERVER_ENABLE_VISUALIZER
     log_->set_level(log_level::trace);
 #endif
 #if defined(_WIN32)
