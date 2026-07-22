@@ -81,7 +81,7 @@ FFI_FUNCTION(void *, getByteArrayDataPtr, (ByteArrayHandle val))
 FFI_FUNCTION(void, pushToByteArray, (ByteArrayHandle val, uint8_t byte), val, byte)
 /** @brief Gets the byte at a specific index in the ByteArray */
 FFI_FUNCTION(uint8_t, getInByteArray, (ByteArrayHandle val, ffi_size_t index), val, index)
-/** @brief Sets a byte at a specific index in the ByteArray */
+/** @brief Sets a byte at a specific index in the ByteArray, resizes if out of bounds */
 FFI_FUNCTION(void, setInByteArray, (ByteArrayHandle val, ffi_size_t index, uint8_t byte), val, index, byte)
 
 /* --- SER MESSAGE INTERFACE --- */

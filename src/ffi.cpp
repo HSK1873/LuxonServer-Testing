@@ -605,9 +605,11 @@ uint8_t getInByteArray(ByteArrayHandle val, ffi_size_t index) {
 }
 
 void setInByteArray(ByteArrayHandle val, ffi_size_t index, uint8_t byte) {
-    if (auto *array = unwrap<ByteArray>(val))
-        if (index < array->size())
-            (*array)[index] = byte;
+    if (auto *array = unwrap<ByteArray>(val)) {
+        if (index >= array->size())
+            array->resize(index + 1);
+        (*array)[index] = byte;
+    }
 }
 
 /* ============================================================================
