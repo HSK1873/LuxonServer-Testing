@@ -51,8 +51,13 @@ FFI_FUNCTION(void, luxonClearLastError, (), )
 
 /** @brief Gets handle of the top coroutine. always call as early as possible! */
 FFI_FUNCTION(CoroutineHandle, luxonGetActiveCoroutine, (), )
-/** @brief Resumes a given coroutine */
+/** @brief Resumes a given coroutine now, on current thread */
 FFI_FUNCTION(void, luxonResumeCoroutine, (CoroutineHandle handle, uint8_t result), handle, result)
+/** @brief Resumes a given coroutine soon, on main thread */
+FFI_FUNCTION(void, luxonResumeCoroutineSoon, (ServerManagerHandle manager, CoroutineHandle handle, uint8_t result), manager, handle, result)
+/** @brief Resumes a given coroutine later, on main thread with given delay */
+FFI_FUNCTION(void, luxonResumeCoroutineLater, (ServerManagerHandle manager, CoroutineHandle handle, uint8_t result, uint32_t delay_ms), manager, handle, result,
+             delay_ms)
 /** @brief Destroys a given coroutine, avoid! */
 FFI_FUNCTION(void, luxonDestroyCoroutine, (CoroutineHandle handle), handle)
 

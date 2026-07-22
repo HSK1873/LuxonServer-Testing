@@ -512,6 +512,18 @@ void luxonResumeCoroutine(CoroutineHandle handle, uint8_t result) {
 #endif
 }
 
+void luxonResumeCoroutineSoon(ServerManagerHandle manager, CoroutineHandle handle, uint8_t result) { luxonResumeCoroutineLater(manager, handle, result, 0); }
+
+void luxonResumeCoroutineLater(ServerManagerHandle manager, CoroutineHandle handle, uint8_t result, uint32_t delay_ms) {
+#ifdef LUXON_SERVER_ENABLE_COROUTINES
+    auto *serman = unwrap<server::ServerManager>(manager);
+    auto *ctx = unwrap<FfiCoroContext>(handle);
+    if (serman && ctx && ctx->awaiter_handle)
+        serman->add_scheduled_task(
+            delay_ms, [awaiter_handle = ctx->awaiter_handle, result]() { basiccoro::FfiAwaiter<uint8_t, void (*)(void *)>::resume(awaiter_handle, result); });
+#endif
+}
+
 void luxonDestroyCoroutine(CoroutineHandle handle) {
 #ifdef LUXON_SERVER_ENABLE_COROUTINES
     auto *ctx = unwrap<FfiCoroContext>(handle);
