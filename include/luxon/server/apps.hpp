@@ -65,7 +65,7 @@ class App {
 
     AppSettings settings_;
 
-    std::unordered_map<LobbyId, std::weak_ptr<Lobby>, LobbyIdHash> lobbies_;
+    flat_map<LobbyId, std::weak_ptr<Lobby>> lobbies_;
     std::unordered_map<std::string_view, std::weak_ptr<Game>> games_;
 
 public:
@@ -82,7 +82,7 @@ public:
 
     const AppSettings& get_settings() const { return settings_; }
     std::shared_ptr<Lobby> get_lobby(LobbyId id = {});
-    const std::unordered_map<LobbyId, std::weak_ptr<Lobby>, LobbyIdHash>& get_lobbies() const { return lobbies_; }
+    const auto& get_lobbies() const { return lobbies_; }
 
     std::shared_ptr<App> get_shared() { return try_get(server_manager, std::string(id), std::string(version)); }
 

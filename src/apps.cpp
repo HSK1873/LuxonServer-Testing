@@ -85,7 +85,7 @@ size_t App::get_peer_count() const {
     size_t fres = 0;
     for (const auto& pp : server_manager.peer_persistent_data)
         fres += !!(pp->app.get() == this);
-    for (const auto& [lobby_name, weak_lobby] : get_lobbies())
+    for (const auto& [lobby_name, weak_lobby] : lobbies_)
         if (auto lobby = weak_lobby.lock())
             fres += lobby->get_peer_count();
     return fres;
