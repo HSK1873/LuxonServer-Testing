@@ -191,7 +191,6 @@ private:
     std::list<HandlerPtr<HandlerBase>> connections_;
     std::vector<std::shared_ptr<Game>> external_games_;
     std::priority_queue<ScheduledTask, std::vector<ScheduledTask>, std::greater<ScheduledTask>> scheduled_tasks_;
-    std::queue<std::move_only_function<void()>> main_loop_calls_;
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
     IPC parent_ipc_;
     IPC *ipc_broadcast_skip_{};
@@ -199,7 +198,7 @@ private:
     std::unordered_map<uint16_t, IPC> subprocesses_;
 #endif
 #ifdef LUXON_SERVER_MULTITHREADED
-    std::mutex main_loop_calls_mutex_;
+    std::mutex scheduled_tasks_mutex_;
 #endif
 
     common::Timer startup_time_;
@@ -311,6 +310,9 @@ public:
     ///
     void add_scheduled_task(unsigned delay_ms, std::function<void()>&& callback) {
         unsigned target_time = startup_time_.get() + delay_ms;
+#ifdef LUXON_SERVER_MULTITHREADED
+        std::scoped_lock L(scheduled_tasks_mutex_);
+#endif
         scheduled_tasks_.push({target_time, std::move(callback)});
     }
 
