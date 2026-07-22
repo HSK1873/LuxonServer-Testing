@@ -11,6 +11,7 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <luxon/flat_map.hpp>
 
 namespace server {
 class ServerManager;
@@ -58,11 +59,14 @@ struct AppSettings {
 };
 
 class App {
+    friend class Lobby;
+
     App(ServerManager& server_manager, std::string_view id, std::string_view version);
 
     AppSettings settings_;
 
     std::unordered_map<LobbyId, std::weak_ptr<Lobby>, LobbyIdHash> lobbies_;
+    std::unordered_map<std::string_view, std::weak_ptr<Game>> games_;
 
 public:
     ServerManager& server_manager;
@@ -81,6 +85,8 @@ public:
     const std::unordered_map<LobbyId, std::weak_ptr<Lobby>, LobbyIdHash>& get_lobbies() const { return lobbies_; }
 
     std::shared_ptr<App> get_shared() { return try_get(server_manager, std::string(id), std::string(version)); }
+
+    const auto& get_games() const { return games_; }
 
     static std::shared_ptr<App> try_get(ServerManager& server_manager, const std::string& id, const std::string& version);
     static std::shared_ptr<App> get(ServerManager& server_manager, const std::string& id, const std::string& version);

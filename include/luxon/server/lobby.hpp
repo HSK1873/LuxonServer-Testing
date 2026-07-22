@@ -42,7 +42,7 @@ struct Lobby : std::enable_shared_from_this<Lobby> {
     const std::string name;
     const uint8_t type;
 
-    std::unordered_map<std::string_view, std::weak_ptr<Game>> games;
+    std::vector<std::weak_ptr<Game>> games;
     std::list<GameListUpdateHandler> game_list_update_handlers;
 
     sqlite3 *sql{};

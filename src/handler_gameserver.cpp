@@ -659,17 +659,18 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
             }
 
             // Find or create game
-            auto lobby = peer_->persistent->app->get_lobby(); // Restrict to default lobby for now
+            auto& app = *peer_->persistent->app;
+            const auto& app_games = app.get_games();
             auto game_id = params->get<DictKeyCodes::GameAndActor::GameId>();
 
             std::shared_ptr<Game> target_game;
-            if (auto game_res = lobby->games.find(game_id); game_res != lobby->games.end()) {
+            if (auto game_res = app_games.find(game_id); game_res != app_games.end()) {
                 target_game = game_res->second.lock();
             } else {
                 bool should_create = (req.operation_code == OpCodes::Matchmaking::CreateGame) || params->get<DictKeyCodes::AuthAndLobby::CreateIfNotExists>();
 
                 if (should_create) {
-                    auto new_game = lobby->create_game(std::string(game_id), "", true);
+                    auto new_game = app.get_lobby()->create_game(std::string(game_id), "", true);
                     if (!new_game) {
                         send(proto_->Serialize(new_game.error()));
                         lco_return;

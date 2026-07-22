@@ -128,6 +128,8 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
             return server_manager_.get_random_server_base_address(ServerType::GameServer);
         };
 
+        auto& app = *peer_->persistent->app;
+
         switch (req.operation_code) {
 
         case OpCodes::Lobby::JoinLobby: {
@@ -240,11 +242,10 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
             ser::OperationResponseMessage resp{.operation_code = OpCodes::Lobby::GetGameList};
 
             try {
-                const auto& games = lobby.value()->games;
-
                 auto game_ids = lobby.value()->query_lobbies(params->get<DictKeyCodes::RoutingAndEvents::Data>());
                 auto game_list = std::make_shared<ser::Hashtable>();
 
+                const auto& games = app.get_games();
                 for (const auto& id : game_ids)
                     if (auto res = games.find(id); res != games.end())
                         if (auto game = res->second.lock())
@@ -291,7 +292,7 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
                 game_id = generate_game_id(peer_->persistent->user_id);
 
             // Make sure no game with given ID already exists
-            if (lobby.value()->games.contains(game_id)) {
+            if (app.get_games().contains(game_id)) {
                 const ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::CreateGame,
                                                          .return_code = ErrorCodes::Matchmaking::GameIdAlreadyExists,
                                                          .debug_message = "Game ID already exists"};
@@ -352,10 +353,11 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
 
             // Find game with given ID
             peer_->log->info("Finding game: {}", game_id);
+            const auto& app_games = app.get_games();
 
             std::shared_ptr<Game> game;
             bool is_new = false;
-            if (auto res = lobby.value()->games.find(game_id); res == lobby.value()->games.end()) {
+            if (auto res = app_games.find(game_id); res == app_games.end()) {
                 if (!params->get<DictKeyCodes::AuthAndLobby::CreateIfNotExists>()) {
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::JoinGame,
                                                              .return_code = ErrorCodes::Matchmaking::GameIdNotExists,
@@ -453,7 +455,8 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
                 try {
                     auto game_ids = lobby.value()->query_lobbies(sql_filter);
                     for (const auto& id : game_ids) {
-                        if (auto res = lobby.value()->games.find(id); res != lobby.value()->games.end()) {
+                        const auto& app_games = app.get_games();
+                        if (auto res = app_games.find(id); res != app_games.end()) {
                             if (auto game = res->second.lock()) {
                                 // Make sure game is joinable
                                 if (game->validate_join(peer_->persistent->user_id).first == ErrorCodes::Core::Ok) {
@@ -478,7 +481,7 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
                 std::vector<std::shared_ptr<Game>> candidates;
                 candidates.reserve(std::min<size_t>(lobby.value()->games.size(), 500)); // Better to allocate more than less?
 
-                for (auto& [id, weak_game] : lobby.value()->games) {
+                for (auto& weak_game : lobby.value()->games) {
                     auto game = weak_game.lock();
                     if (!game)
                         continue;
@@ -778,7 +781,7 @@ ser::HashtablePtr MasterServerHandler::get_game_list(Lobby& lobby, std::function
     std::vector<std::shared_ptr<Game>> sorted_games;
     sorted_games.reserve(lobby.games.size());
 
-    for (auto& [name, weak_game] : lobby.games) {
+    for (auto& weak_game : lobby.games) {
         auto game = weak_game.lock();
         if (!game)
             continue;

@@ -354,17 +354,19 @@ static int vtFilter(sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, in
         };
 
         // Execute search
+        auto& app = pVTab->lobby->app;
+        const auto& app_games = app->get_games();
+        const auto& lobby_games = pVTab->lobby->games;
         if (idxNum & 1) {
-            auto it = pVTab->lobby->games.find(filter_id);
-            if (it != pVTab->lobby->games.end()) {
+            auto it = app_games.find(filter_id);
+            if (it != app_games.end()) {
                 if (auto game = it->second.lock()) {
-                    if (matches_props(game))
+                    if (game->lobby.get() == pVTab->lobby && matches_props(game))
                         pCur->games_snapshot.push_back(std::move(game));
                 }
             }
         } else {
-            for (const auto& [id, weak_game] : pVTab->lobby->games) {
-                (void)id;
+            for (const auto& weak_game : lobby_games) {
                 if (auto game = weak_game.lock()) {
                     if (matches_props(game))
                         pCur->games_snapshot.push_back(std::move(game));

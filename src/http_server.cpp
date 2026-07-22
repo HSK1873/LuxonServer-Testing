@@ -656,6 +656,11 @@ json HttpServer::route_request(std::string_view method, std::string path) {
     if (segs.front().empty())
         segs.erase(segs.begin());
 
+    // Redirect old legacy paths
+    //  - /apps/{app}/lobbies/{name}/games/{game_id}/... -> /apps/{app}/games/{game_id}/...
+    if (segs.size() >= 6 && segs[0] == "apps" && segs[2] == "lobbies" && segs[4] == "games")
+        segs.erase(segs.begin() + 2, segs.begin() + 4);
+
     // /stats/{metric}/{type}/{duration_ms}
     if (segs.size() >= 1 && segs[0] == "stats") {
         if (segs.size() != 4) {
@@ -750,6 +755,70 @@ json HttpServer::route_request(std::string_view method, std::string path) {
             return res;
         }
 
+        // Game roots: /apps/{app}/games/{game_id}/...
+        if (segs.size() >= 4 && segs[2] == "games") {
+            std::string_view gameId = segs[3];
+            const auto& app_games = app->get_games();
+            auto it = app_games.find(gameId);
+            if (it == app_games.end())
+                throw std::out_of_range("Game ID not found");
+            auto game = it->second.lock();
+            if (!game)
+                throw std::out_of_range("Game expired");
+
+            // /apps/{app}/games/{game_id}
+            if (segs.size() == 4)
+                return {{"id", game->id},
+                        {"master_client_id", game->master_actor},
+                        {"player_ttl", game->player_ttl},
+                        {"empty_room_ttl", game->empty_game_ttl},
+                        {"flags", game->flags},
+                        {"expected_users", game->expected_users},
+                        {"full_props", json_conv::photon_hash_to_json(game->get_game_props())}};
+
+            // /apps/{app}/games/{game_id}/actors
+            if (segs.size() == 5 && segs[4] == "actors") {
+                json res = json::array();
+                for (auto& gp : game->peers) {
+                    std::string uid = "";
+                    // If persistent peer is still attached (could be disconnected/stale)
+                    if (auto p = gp.peer.lock())
+                        if (p->is_authenticated())
+                            uid = p->persistent->user_id;
+
+                    // Check actor props for UserId if persistent isn't available or just to be sure
+                    if (uid.empty() && gp.actor_props.contains(static_cast<int32_t>(253) /* UserId */)) {
+                        auto& val = gp.actor_props.at(static_cast<int32_t>(253));
+                        if (val.is<std::string>())
+                            uid = val.get<std::string>();
+                    }
+
+                    res.push_back({{"actor_id", gp.actor_id}, {"user_id", uid}});
+                }
+                return res;
+            }
+
+            // /apps/{app}/games/{game_id}/actors/{actor_id}
+            if (segs.size() == 6 && segs[4] == "actors") {
+                int actorId = 0;
+                std::from_chars(segs[5].data(), segs[5].data() + segs[5].size(), actorId);
+
+                const auto *gp = game->find_peer(actorId);
+                if (!gp)
+                    throw std::out_of_range("Actor ID not found");
+
+                json res = {{"actor_id", gp->actor_id},
+                            {"props", json_conv::photon_hash_to_json(gp->actor_props)},
+                            {"interest_groups", gp->interest_groups.to_string()}};
+
+                if (auto p = gp->peer.lock())
+                    if (p->is_authenticated())
+                        res["connection_info"] = {
+                            {"peer_id", p->enet_peer->peer_id()}, {"rtt", p->enet_peer->round_trip_time()}, {"user_id", p->persistent->user_id}};
+                return res;
+            }
+        }
+
         // /apps/{app}/lobbies
         if (segs.size() == 3 && segs[2] == "lobbies") {
             json res = json::array();
@@ -772,7 +841,7 @@ json HttpServer::route_request(std::string_view method, std::string path) {
             // /apps/{app}/lobbies/{name}/games
             if (segs.size() == 5 && segs[4] == "games") {
                 json res = json::array();
-                for (auto& [gid, weak_g] : lobby->games) {
+                for (auto& weak_g : lobby->games) {
                     if (auto g = weak_g.lock()) {
                         res.push_back({{"id", g->id},
                                        {"player_count", g->peers.size()},
@@ -783,70 +852,6 @@ json HttpServer::route_request(std::string_view method, std::string path) {
                     }
                 }
                 return res;
-            }
-
-            // Game roots: /apps/{app}/lobbies/{name}/games/{game_id}/...
-            if (segs.size() >= 6 && segs[4] == "games") {
-                std::string_view gameId = segs[5];
-                auto it = lobby->games.find(gameId);
-                if (it == lobby->games.end())
-                    throw std::out_of_range("Game ID not found");
-                auto game = it->second.lock();
-                if (!game)
-                    throw std::out_of_range("Game expired");
-
-                // /apps/{app}/lobbies/{name}/games/{game_id}
-                if (segs.size() == 6)
-                    return {{"id", game->id},
-                            {"master_client_id", game->master_actor},
-                            {"player_ttl", game->player_ttl},
-                            {"empty_room_ttl", game->empty_game_ttl},
-                            {"flags", game->flags},
-                            {"expected_users", game->expected_users}, // automatic json conversion for set<string>
-                            {"full_props", json_conv::photon_hash_to_json(game->get_game_props())}};
-
-                // /apps/{app}/lobbies/{name}/games/{game_id}/actors
-                if (segs.size() == 7 && segs[6] == "actors") {
-                    json res = json::array();
-                    for (auto& gp : game->peers) {
-                        std::string uid = "";
-                        // If persistent peer is still attached (could be disconnected/stale)
-                        if (auto p = gp.peer.lock())
-                            if (p->is_authenticated())
-                                uid = p->persistent->user_id;
-
-                        // Check actor props for UserId if persistent isn't available or just to be sure
-                        if (uid.empty() && gp.actor_props.contains(static_cast<int32_t>(253) /* UserId */)) {
-                            // Assuming UserId is stored as string in props
-                            auto& val = gp.actor_props.at(static_cast<int32_t>(253));
-                            if (val.is<std::string>())
-                                uid = val.get<std::string>();
-                        }
-
-                        res.push_back({{"actor_id", gp.actor_id}, {"user_id", uid}});
-                    }
-                    return res;
-                }
-
-                // /apps/{app}/lobbies/{name}/games/{game_id}/actors/{actor_id}
-                if (segs.size() == 8 && segs[6] == "actors") {
-                    int actorId = 0;
-                    std::from_chars(segs[7].data(), segs[7].data() + segs[7].size(), actorId);
-
-                    const auto *gp = game->find_peer(actorId);
-                    if (!gp)
-                        throw std::out_of_range("Actor ID not found");
-
-                    json res = {{"actor_id", gp->actor_id},
-                                {"props", json_conv::photon_hash_to_json(gp->actor_props)},
-                                {"interest_groups", gp->interest_groups.to_string()}};
-
-                    if (auto p = gp->peer.lock())
-                        if (p->is_authenticated())
-                            res["connection_info"] = {
-                                {"peer_id", p->enet_peer->peer_id()}, {"rtt", p->enet_peer->round_trip_time()}, {"user_id", p->persistent->user_id}};
-                    return res;
-                }
             }
         }
     }

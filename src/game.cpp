@@ -103,12 +103,6 @@ bool Game::matches_game_info(const GameInfo& info) const {
     if (info.id != id)
         return false;
 
-    if (info.lobby.name != lobby->name)
-        return false;
-
-    if (info.lobby.type != lobby->type)
-        return false;
-
     if (info.lobby.app.id != lobby->app->id)
         return false;
 

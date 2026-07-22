@@ -95,7 +95,7 @@ std::expected<std::shared_ptr<Game>, ser::OperationResponseMessage> Lobby::creat
                                                              .return_code = ErrorCodes::Matchmaking::GameIdNotExists,
                                                              .debug_message = "Game id can't be empty"});
 
-    if (auto res = games.find(id); res != games.end()) {
+    if (auto res = app->games_.find(id); res != app->games_.end()) {
         if (or_get)
             return res->second.lock();
 
@@ -116,13 +116,21 @@ std::expected<std::shared_ptr<Game>, ser::OperationResponseMessage> Lobby::creat
         for (auto& handler : lobby->game_list_update_handlers)
             handler.game_delete(ptr);
 
-        auto& games = lobby->games;
-        if (auto res = games.find(ptr->id); res != games.end())
-            games.erase(res);
+        // Erase from app game map
+        auto& app_games = lobby->app->games_;
+        if (auto res = app_games.find(ptr->id); res != app_games.end())
+            app_games.erase(res);
+
+        // Erase from lobby game list
+        auto& lobby_games = lobby->games;
+        auto lobby_game_it = std::find_if(lobby_games.begin(), lobby_games.end(), [ptr](auto it) { return it.lock().get() == ptr; });
+        if (lobby_game_it != lobby_games.end())
+            lobby_games.erase(lobby_game_it);
 
         delete ptr;
     });
-    games.emplace(fres->id, fres);
+    app->games_.emplace(fres->id, fres);
+    games.emplace_back(fres);
 
     for (auto& handler : game_list_update_handlers)
         handler.game_create(fres);
@@ -134,7 +142,7 @@ size_t Lobby::get_peer_count() const {
     ZoneScoped;
 
     size_t fres = 0;
-    for (auto& [name, weak_game] : games)
+    for (auto& weak_game : games)
         if (auto game = weak_game.lock())
             fres += game->peers.size();
     return fres;
@@ -144,7 +152,7 @@ size_t Lobby::get_master_peer_count() const {
     ZoneScoped;
 
     size_t fres = 0;
-    for (auto& [name, weak_game] : games)
+    for (auto& weak_game : games)
         if (auto game = weak_game.lock())
             fres += !!game->find_peer(game->master_actor);
     return fres;
