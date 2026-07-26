@@ -1,9 +1,6 @@
 // Copyright (c) 2026, the Luxon Server contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
-// Copyright (c) 2026, the Luxon Server contributors
-// SPDX-License-Identifier: BSD-3-Clause
-
 /*
  * MACRO CONFIGURATION
  * ---------------------------
@@ -75,6 +72,44 @@
 #include <luxon/ser_encryption.hpp>
 #include <luxon/visualizer.hpp>
 #include <tracy/Tracy.hpp>
+
+// --- DYNAMIC ENDPOINT RESOLUTION INCLUDES & HELPERS ---
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#endif
+
+thread_local std::string g_current_peer_ip = "";
+thread_local std::string g_dynamic_address_buffer = "";
+
+std::string get_local_ip_for_client(const std::string& target_ip) {
+    if (target_ip.empty()) return "127.0.0.1";
+#ifdef _WIN32
+    SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == INVALID_SOCKET) return "127.0.0.1";
+    
+    sockaddr_in serv = {0};
+    serv.sin_family = AF_INET;
+    serv.sin_port = htons(53);
+    inet_pton(AF_INET, target_ip.c_str(), &serv.sin_addr);
+    
+    connect(sock, (const sockaddr*)&serv, sizeof(serv));
+    
+    sockaddr_in name = {0};
+    int namelen = sizeof(name);
+    getsockname(sock, (sockaddr*)&name, &namelen);
+    
+    char buffer[INET_ADDRSTRLEN] = {0};
+    inet_ntop(AF_INET, &name.sin_addr, buffer, sizeof(buffer));
+    closesocket(sock);
+    
+    return std::string(buffer);
+#else
+    return "127.0.0.1";
+#endif
+}
+// ------------------------------------------------------
 
 namespace server {
 std::function<void(const std::string&)> ServerManager::handle_start_subprocess{};
@@ -214,7 +249,6 @@ ServerProtocol ReadOptionalProtocol(Yaml::Node& map, const char *key, std::strin
 }
 
 std::optional<std::string> ReadOptionalExternalAddress(Yaml::Node& map, std::string_view path) {
-    // `address` is accepted as a legacy alias for `external_address`
     auto external_address = ReadOptionalScalar<std::string>(map, "external_address", path);
     auto legacy_address = ReadOptionalScalar<std::string>(map, "address", path);
 
@@ -344,11 +378,9 @@ template <typename T> T *GetRawPointer(const std::unique_ptr<T>& ptr) { return p
 ServerManagerConfig ServerManager::receive_config_from_ipc(IPC& ipc) {
     std::optional<luxon::ser::Message> msg;
 
-    // Poll the non-blocking IPC socket until the parent transmits the configuration
     while (!(msg = ipc.receive_message()))
         ;
 
-    // Expect a GenericValueMessage containing the PFR-encoded ServerManagerConfig
     if (auto *gvm = msg.value().get_if<luxon::ser::GenericValueMessage>()) {
         auto decoded = pfr_codec::from_value<ServerManagerConfig>(gvm->value);
         if (!decoded)
@@ -490,16 +522,13 @@ std::string_view ServerManager::get_random_server_base_address(ServerType server
     std::vector<const ServerConfig *> candidates;
     candidates.reserve(configs_.size());
 
-    // Collect all valid endpoints for requested type
     for (const auto& cfg : configs_)
         if (cfg.type == server_type && !cfg.external_address.empty())
             candidates.push_back(&cfg);
 
-    // Handle cases where no config exists
     if (candidates.empty())
         throw std::runtime_error(std::format("No server configuration found for {}", ServerTypeToString(server_type)));
 
-    // Return random endpoint from candidates
     static std::mt19937 generator{1234};
     std::uniform_int_distribution<size_t> distribution(0, candidates.size() - 1);
     return candidates[distribution(generator)]->external_address;
@@ -515,7 +544,6 @@ std::string_view ServerManager::resolve_server_address(ServerType type, ServerPr
                 if (proxy.protocol == proto)
                     return proxy.address;
 
-            // Fallback
             return cfg.external_address;
         }
     }
@@ -524,7 +552,17 @@ std::string_view ServerManager::resolve_server_address(ServerType type, ServerPr
 
 std::string_view ServerManager::get_random_server_address(ServerType server_type, ServerProtocol proto) {
     std::string_view base = get_random_server_base_address(server_type);
-    return resolve_server_address(server_type, proto, base);
+    std::string_view resolved = resolve_server_address(server_type, proto, base);
+
+    // --- DYNAMIC ENDPOINT RESOLUTION INTERCEPT ---
+    if (resolved.starts_with("AUTO:")) {
+        std::string port = std::string(resolved.substr(5));
+        g_dynamic_address_buffer = get_local_ip_for_client(g_current_peer_ip) + ":" + port;
+        return g_dynamic_address_buffer;
+    }
+    // ---------------------------------------------
+
+    return resolved;
 }
 
 void ServerManager::run_scheduled_tasks() {
@@ -549,7 +587,6 @@ void ServerManager::stun_keepalive(enet::EnetServer& server, uint16_t port) {
 }
 
 void ServerManager::run() {
-    // Main Service Loop
     running_ = true;
     do {
         run_once();
@@ -563,31 +600,24 @@ bool ServerManager::run_once() {
     ZoneScoped;
     {
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
-        // Start idle performance timer
         const auto start_time = std::chrono::steady_clock::now();
 #endif
 
-        // Run sock selector
         sock_selector_.run(125);
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
-        // End idle performance timer
         const auto end_time = std::chrono::steady_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-
-        // Store metric
         idle_time.add(static_cast<unsigned>(duration));
 #endif
     }
     {
         ZoneScopedN("run_once_busy");
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
-        // Start busy performance timer
         const auto start_time = std::chrono::steady_clock::now();
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
-        // Receive and process IPC messages from parent
         if (parent_ipc_.is_open())
             while (const auto ipc_msg = parent_ipc_.receive_message())
                 process_parent_ipc_message(parent_ipc_, *ipc_msg);
@@ -595,35 +625,29 @@ bool ServerManager::run_once() {
         ipc_broadcast_skip_ = nullptr;
 #endif
 
-        // Check if slow update should be done
         const bool slow_update = last_slow_update_.get() > 250;
         if (slow_update)
             last_slow_update_.reset();
 
-        // Dispatch and handle incoming application messages
         uint32_t remaining_timeout = tick_time_budget_;
         size_t servers_to_process = servers_.size();
 
         {
             ZoneScopedN("service_peers");
 
-            // Round-robin over servers to prevent starvation
             while (servers_to_process > 0 && remaining_timeout > 0) {
-                // Wrap around to beginning if end is hit
                 if (next_server_it_ == servers_.end())
                     next_server_it_ = servers_.begin();
 
                 auto& [port, server] = *next_server_it_;
 
                 try {
-                    // Service peers using whatever remains of global budget
                     if (!server.service_peers(remaining_timeout))
                         log_->warn("Queueing UDP datagrams on port {}!", port);
                 } catch (const std::exception& e) {
                     log_->warn("Uncaught exception on port {}: {}", port, e.what());
                 }
 
-                // Move to the next server and decrement safety counter
                 ++next_server_it_;
                 --servers_to_process;
             }
@@ -632,11 +656,9 @@ bool ServerManager::run_once() {
         if (servers_to_process > 0)
             log_->warn("Tick time budget exhausted! {} servers deferred to next tick.", servers_to_process);
 
-        // Trigger updates
         if (slow_update) {
             ZoneScopedN("service_slow_updates");
 #ifdef LUXON_ENET_ENABLE_METRICS
-            // Tick enet metrics
             const auto enet_metrics_last_tick_ms = enet_metrics_last_tick_.get();
             if (enet_metrics_last_tick_ms > 1000) {
                 const double enet_metrics_last_tick_s = double(enet_metrics_last_tick_ms) * 0.001;
@@ -644,7 +666,6 @@ bool ServerManager::run_once() {
                 enet_metrics_.tick(enet_metrics_last_tick_s);
             }
 #endif
-            // Update connection handlers
             for (auto& connection : connections_) {
                 try {
                     connection->HandleSlowUpdate();
@@ -656,17 +677,13 @@ bool ServerManager::run_once() {
             }
         }
 
-        // Run scheduled tasks
         run_scheduled_tasks();
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
-
-        // Update HTTP server
         if (http_server_)
             http_server_->service_now();
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
-        // Stop if parent has died
         if (is_subprocess_ && !parent_ipc_.is_open()) {
             stop();
             log_->info("Parent has closed the IPC connection. Stopping...");
@@ -674,11 +691,8 @@ bool ServerManager::run_once() {
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
-        // End busy performance timer
         const auto end_time = std::chrono::steady_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-
-        // Store metric
         busy_time.add(static_cast<unsigned>(duration));
 #endif
     }
@@ -733,54 +747,38 @@ void ServerManager::setup_http_server() {
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 void ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& msg) {
     ipc_broadcast_skip_ = &sender;
-
-    // Only accept event messages
     auto *event_msg = msg.get_if<ser::EventMessage>();
     if (!event_msg)
         return;
-
     return process_ipc_event(*event_msg);
 }
 
 void ServerManager::process_parent_ipc_message(IPC& sender, const ser::Message& msg) {
     ipc_broadcast_skip_ = &sender;
-
-    // Only accept event messages
     auto *event_msg = msg.get_if<ser::EventMessage>();
     if (!event_msg)
         return;
-
     return process_ipc_event(*event_msg);
 }
 
 void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
     const auto& params = event_msg.parameters;
 
-    // Handle lobby/game updates
     if (event_msg.event_code == IPCEventCodes::GameUpdate || event_msg.event_code == IPCEventCodes::GameDelete) {
-        // Find tracked external game
         const auto game_info = Game::decode_game_info(params);
         auto it = std::find_if(external_games_.begin(), external_games_.end(), [&](const std::shared_ptr<Game>& g) { return g->matches_game_info(game_info); });
 
         if (event_msg.event_code == IPCEventCodes::GameDelete) {
-            // Handle game deletion
             if (it != external_games_.end()) {
                 auto game = *it;
-
-                // Make sure game expires immediately
                 (*it)->empty_game_ttl = 0;
-
-                // Remove from external games tracking
                 external_games_.erase(it);
             }
-
             return;
         } else if (event_msg.event_code == IPCEventCodes::GameUpdate) {
-            // Handle game update
             std::shared_ptr<Game> game;
             bool is_new = false;
 
-            // If known, reuse it. Otherwise, create new external game
             if (it != external_games_.end()) {
                 game = *it;
             } else {
@@ -808,7 +806,6 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
                 if (expected_game) {
                     game = std::move(expected_game.value());
                     if (game) {
-                        // Persist locally
                         external_games_.push_back(game);
                         is_new = true;
                     } else {
@@ -818,16 +815,12 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
                 }
             }
 
-            // Apply updated properties
             auto props_ptr = params[DictKeyCodes::Properties::GameProperties].get_or<ser::HashtablePtr>(nullptr);
             if (props_ptr) {
-                // Handle PlayerCount separately
                 if (auto it = props_ptr->find(GameProps::PlayerCount); it != props_ptr->end())
                     it->second.store_if<uint8_t>(game->dummy_peer_count);
                 if (game->dummy_peer_count > 0)
                     game->is_created = true;
-
-                // Apply all other properties
                 game->insert_game_props(*props_ptr);
             }
 
@@ -838,9 +831,7 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
         }
     }
 
-    // Handle persistent peer stores
     if (event_msg.event_code == IPCEventCodes::PersistentPeerStore) {
-        // Get token
         std::string_view token;
         if (const auto& token_param = params[DictKeyCodes::LoadBalancing::Token]; token_param.is<std::string>()) {
             token = token_param.get<std::string>();
@@ -849,7 +840,6 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
             return;
         }
 
-        // Get user id
         std::string_view user_id;
         if (const auto& user_id_param = params[DictKeyCodes::LoadBalancing::UserId]; user_id_param.is<std::string>()) {
             user_id = user_id_param.get<std::string>();
@@ -891,7 +881,6 @@ void ServerManager::setup() {
     cfg.time_ping_interval_ms = 1000;
     cfg.disconnect_timeout_ms = 5000;
 
-    // Create servers
     for (const auto& config : configs_) {
         if (config.is_routing_only)
             continue;
@@ -899,13 +888,12 @@ void ServerManager::setup() {
         if (config.subprocess) {
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
             setup_subprocess(config);
-            continue; // Skip the native bind routine in the parent for this iteration
+            continue;
 #else
             log_->warn("Subprocess enabled in config, but not enabled at compile time");
 #endif
         }
 
-        // Create enet server and configure it
         log_->info("Setting up {} on port {}", ServerTypeToString(config.type), config.port);
 
         auto& server = servers_
@@ -918,21 +906,18 @@ void ServerManager::setup() {
                            .first->second;
 
         server.on_peer_connected = [this, &config](std::shared_ptr<enet::EnetPeer> enetPeer) {
-            // Construct peer
             auto peer = std::make_shared<Peer>();
             peer->enet_peer = enetPeer;
             peer->log = create_logger(std::format("Peer {}@{}", enetPeer->peer_id(), enetPeer->remote_endpoint()->to_string()));
-            peer->protocol = std::make_unique<ser::GpBinaryV18>(); // Default version
+            peer->protocol = std::make_unique<ser::GpBinaryV18>();
 #ifdef LUXON_SERVER_ENABLE_VISUALIZER
             peer->log->set_level(log_level::trace);
 #endif
             peer->log->info("Peer {} constructed with {} handler", peer->enet_peer->peer_id(), ServerTypeToString(config.type));
 
-            // Construct handler
             auto handler = ServerTypeToHandler(config.type, *this, std::move(peer));
             handler->set_allow_unsolicited(config.allow_unsolicited);
 
-            // Handler pointer must be owning with plugins enabled to ensure no destruction while coroutine is active
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
             auto handler_ptr = handler;
 #else
@@ -940,9 +925,7 @@ void ServerManager::setup() {
 #endif
             auto *raw_handler = GetRawPointer(handler_ptr);
 
-            // Install callbacks
             enetPeer->on_log_message = [this, handler = raw_handler](enet::LogLevel enet_level, std::string_view message) {
-                // Convert log level
                 log_level level;
                 switch (enet_level) {
                 case luxon::enet::LogLevel::Warning:
@@ -952,8 +935,6 @@ void ServerManager::setup() {
                     level = log_level::err;
                     break;
                 }
-
-                // Emit log message
                 handler->get_peer()->log->log(level, "[ENet] {}", message);
             };
 
@@ -971,7 +952,6 @@ void ServerManager::setup() {
 
                     if (state == enet::EnetConnectionState::Disconnected) {
                         lco_await handler->HandleDisconnect();
-                        // Self-destruct handler, this will invalidate the pointer
                         self.add_scheduled_task(0, [&self, handler]() { self.connections_.remove_if([handler](auto& v) { return v.get() == handler; }); });
                     }
                 }(*this, state, handler));
@@ -979,16 +959,17 @@ void ServerManager::setup() {
 
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
             enetPeer->on_payload_command = [this, handler_capture = std::weak_ptr<HandlerBase>(handler_ptr)](enet::EnetCommand&& cmd) {
-                lco_background([](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
+                auto coroutine = [](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
                     auto handler = h_token.lock();
                     if (!handler)
                         lco_return;
-#else
-            enetPeer->on_payload_command = [this, handler_capture = handler_ptr](enet::EnetCommand&& cmd) {
-                lco_background([](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
-                    auto *handler = h_token;
-#endif
                     auto& peer = handler->get_peer();
+
+                    // --- DYNAMIC ENDPOINT: RECORD CLIENT IP ---
+                    std::string ep_str = peer->enet_peer->remote_endpoint()->to_string();
+                    size_t colon = ep_str.find_last_of(':');
+                    g_current_peer_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
+                    // ------------------------------------------
 
 #ifdef LUXON_SERVER_ENABLE_VISUALIZER
                     peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
@@ -1000,11 +981,47 @@ void ServerManager::setup() {
                         }
                     }
 #endif
-
-#ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
                     self.active_command_restarter_ = CommandRestarter::create(handler, cmd);
                     self.active_command_restarter_allowed_ = true;
                     self.inside_command_ = true;
+
+                    try {
+                        lco_await handler->HandleENetCommand(std::move(cmd));
+                    } catch (const std::exception& e) {
+                        peer->log->critical("Disconnecting due to uncaught exception in ENet command handler: {}", e.what());
+                        peer->disconnect();
+                    }
+
+                    self.inside_command_ = false;
+                    if (self.active_command_restarter_allowed_ && !self.should_abort_active_command()) {
+                        peer->log->warn("Command did not commit!");
+                        self.mark_command_committed();
+                    }
+                    self.active_command_restarter_.reset();
+                };
+                lco_background(coroutine(*this, std::move(cmd), std::move(handler_capture)));
+            };
+#else
+            enetPeer->on_payload_command = [this, handler_capture = handler_ptr](enet::EnetCommand&& cmd) {
+                auto coroutine = [](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
+                    auto *handler = h_token;
+                    auto& peer = handler->get_peer();
+
+                    // --- DYNAMIC ENDPOINT: RECORD CLIENT IP ---
+                    std::string ep_str = peer->enet_peer->remote_endpoint()->to_string();
+                    size_t colon = ep_str.find_last_of(':');
+                    g_current_peer_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
+                    // ------------------------------------------
+
+#ifdef LUXON_SERVER_ENABLE_VISUALIZER
+                    peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
+                                     cmd.header.channel_id);
+                    if (!visualizer::print_ser_message(cmd.get_payload(), 2, *peer->protocol)) {
+                        if (!visualizer::print_http_message(cmd.get_payload(), 2)) {
+                            peer->log->error("Message not understood!");
+                            visualizer::helpers::print_hex_dump(cmd.get_payload(), 2);
+                        }
+                    }
 #endif
                     try {
                         lco_await handler->HandleENetCommand(std::move(cmd));
@@ -1012,18 +1029,11 @@ void ServerManager::setup() {
                         peer->log->critical("Disconnecting due to uncaught exception in ENet command handler: {}", e.what());
                         peer->disconnect();
                     }
-#ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
-                    self.inside_command_ = false;
-                    if (self.active_command_restarter_allowed_ && !self.should_abort_active_command()) {
-                        peer->log->warn("Command did not commit!");
-                        self.mark_command_committed();
-                    }
-                    self.active_command_restarter_.reset();
-#endif
-                }(*this, std::move(cmd), std::move(handler_capture)));
+                };
+                lco_background(coroutine(*this, std::move(cmd), std::move(handler_capture)));
             };
+#endif
 
-            // Add to connection list
             auto& handlerPtr = connections_.emplace_back(std::move(handler));           
         };
 
@@ -1031,7 +1041,6 @@ void ServerManager::setup() {
             log_->info("[STUN:{}] NAT punch complete  --> {} <-- ", config.port, ep.to_string());
         };
 
-        // Make server ready for listening
         log_->info("Starting {} on port {}", ServerTypeToString(config.type), config.port);
 
         if (!server.bind(config.port, enable_ipv6_)) {
@@ -1039,7 +1048,6 @@ void ServerManager::setup() {
             continue;
         }
 
-        // Start STUN binding request if enabled
         if (!config.stun_server_host.empty()) {
             if (server.request_stun_binding(config.stun_server_host.c_str(), enable_ipv6_, config.stun_server_port)) {
                 log_->info("[STUN:{}] Starting NAT punch via STUN server: {}:{}", config.port, config.stun_server_host, config.stun_server_port);
@@ -1049,7 +1057,6 @@ void ServerManager::setup() {
             }
         }
 
-        // Add server to sock selector
         if (!sock_selector_.add_read_fd(server.native_handle(), [&server](int fd) {
                 ZoneScopedN("service_server");
                 server.service_self();
@@ -1075,21 +1082,17 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
         return;
     }
 
-    // Emplace IPC into manager's tracked subprocesses
     IPC& ipc = subprocesses_.try_emplace(config.port, std::move(*ipc_opt)).first->second;
 
-    // Set sock selector handler
     sock_selector_.add_read_fd(ipc.get_fd(), [this, &ipc](SockSelector::socket_t) {
         while (const auto ipc_msg = ipc.receive_message())
             process_child_ipc_message(ipc, *ipc_msg);
         ipc_broadcast_skip_ = nullptr;
     });
 
-    // Trigger external subprocess handler using new child socket
     handle_start_subprocess(IPC::socket_to_string(ipc.get_child_fd()));
     ipc.close_child_fd();
 
-    // Synthesize child's configuration state
     ServerManagerConfig child_config;
     child_config.enable_ipv6 = enable_ipv6_;
     child_config.max_connections = max_connections_;
@@ -1100,7 +1103,6 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
         child_config.settings_database_path = settings_database_path + ":ro";
 #endif
 
-    // Make sure child actually binds server, doesn't endlessly fork and knows about all other servers
     for (const auto& cfg : configs_) {
         ServerConfig child_cfg = cfg;
         child_cfg.subprocess = false;
@@ -1113,14 +1115,12 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
     }
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
-    // Set up embedded HTTP server on child
     if (http_config_) {
         child_config.http = http_config_;
-        child_config.http->port += ipc.get_fd(); // Use a different port
+        child_config.http->port += ipc.get_fd();
     }
 #endif
 
-    // Encode the configuration object
     auto val_res = pfr_codec::to_value(child_config, {.zero_copy = true});
     if (val_res)
         ipc.send_message(luxon::ser::GenericValueMessage{std::move(*val_res)});
