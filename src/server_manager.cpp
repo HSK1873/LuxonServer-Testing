@@ -92,13 +92,24 @@ std::string get_local_ip_for_client(const std::string& target_ip) {
     sockaddr_in serv = {0};
     serv.sin_family = AF_INET;
     serv.sin_port = htons(53);
-    inet_pton(AF_INET, target_ip.c_str(), &serv.sin_addr);
     
-    connect(sock, (const sockaddr*)&serv, sizeof(serv));
+    // SAFE FALLBACK: If IP parsing fails (e.g. invalid format), return localhost instead of 0.0.0.0
+    if (inet_pton(AF_INET, target_ip.c_str(), &serv.sin_addr) <= 0) {
+        closesocket(sock);
+        return "127.0.0.1";
+    }
+    
+    if (connect(sock, (const sockaddr*)&serv, sizeof(serv)) == SOCKET_ERROR) {
+        closesocket(sock);
+        return "127.0.0.1";
+    }
     
     sockaddr_in name = {0};
     int namelen = sizeof(name);
-    getsockname(sock, (sockaddr*)&name, &namelen);
+    if (getsockname(sock, (sockaddr*)&name, &namelen) == SOCKET_ERROR) {
+        closesocket(sock);
+        return "127.0.0.1";
+    }
     
     char buffer[INET_ADDRSTRLEN] = {0};
     inet_ntop(AF_INET, &name.sin_addr, buffer, sizeof(buffer));
@@ -965,11 +976,15 @@ void ServerManager::setup() {
                         lco_return;
                     auto& peer = handler->get_peer();
 
-                    // --- DYNAMIC ENDPOINT: RECORD CLIENT IP ---
+                    // --- DYNAMIC ENDPOINT: CLEAN AND RECORD CLIENT IP ---
                     std::string ep_str = peer->enet_peer->remote_endpoint()->to_string();
                     size_t colon = ep_str.find_last_of(':');
-                    g_current_peer_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
-                    // ------------------------------------------
+                    std::string clean_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
+                    if (!clean_ip.empty() && clean_ip.front() == '[') clean_ip.erase(0, 1);
+                    if (!clean_ip.empty() && clean_ip.back() == ']') clean_ip.erase(clean_ip.length() - 1);
+                    if (clean_ip.starts_with("::ffff:")) clean_ip.erase(0, 7);
+                    g_current_peer_ip = clean_ip;
+                    // ----------------------------------------------------
 
 #ifdef LUXON_SERVER_ENABLE_VISUALIZER
                     peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
@@ -1007,11 +1022,15 @@ void ServerManager::setup() {
                     auto *handler = h_token;
                     auto& peer = handler->get_peer();
 
-                    // --- DYNAMIC ENDPOINT: RECORD CLIENT IP ---
+                    // --- DYNAMIC ENDPOINT: CLEAN AND RECORD CLIENT IP ---
                     std::string ep_str = peer->enet_peer->remote_endpoint()->to_string();
                     size_t colon = ep_str.find_last_of(':');
-                    g_current_peer_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
-                    // ------------------------------------------
+                    std::string clean_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
+                    if (!clean_ip.empty() && clean_ip.front() == '[') clean_ip.erase(0, 1);
+                    if (!clean_ip.empty() && clean_ip.back() == ']') clean_ip.erase(clean_ip.length() - 1);
+                    if (clean_ip.starts_with("::ffff:")) clean_ip.erase(0, 7);
+                    g_current_peer_ip = clean_ip;
+                    // ----------------------------------------------------
 
 #ifdef LUXON_SERVER_ENABLE_VISUALIZER
                     peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
