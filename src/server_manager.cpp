@@ -78,6 +78,12 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <cstring>
 #endif
 
 thread_local std::string g_current_peer_ip = "";
@@ -85,7 +91,9 @@ thread_local std::string g_dynamic_address_buffer = "";
 
 std::string get_local_ip_for_client(const std::string& target_ip) {
     if (target_ip.empty()) return "127.0.0.1";
+
 #ifdef _WIN32
+    // --- Windows Implementation (Winsock) ---
     SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock == INVALID_SOCKET) return "127.0.0.1";
     
@@ -93,7 +101,6 @@ std::string get_local_ip_for_client(const std::string& target_ip) {
     serv.sin_family = AF_INET;
     serv.sin_port = htons(53);
     
-    // SAFE FALLBACK: If IP parsing fails (e.g. invalid format), return localhost instead of 0.0.0.0
     if (inet_pton(AF_INET, target_ip.c_str(), &serv.sin_addr) <= 0) {
         closesocket(sock);
         return "127.0.0.1";
@@ -116,8 +123,39 @@ std::string get_local_ip_for_client(const std::string& target_ip) {
     closesocket(sock);
     
     return std::string(buffer);
+
 #else
-    return "127.0.0.1";
+    // --- Linux, macOS & BSD Implementation (POSIX Sockets) ---
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) return "127.0.0.1";
+    
+    struct sockaddr_in serv;
+    memset(&serv, 0, sizeof(serv));
+    serv.sin_family = AF_INET;
+    serv.sin_port = htons(53);
+    
+    if (inet_pton(AF_INET, target_ip.c_str(), &serv.sin_addr) <= 0) {
+        close(sock);
+        return "127.0.0.1";
+    }
+    
+    if (connect(sock, (const struct sockaddr*)&serv, sizeof(serv)) < 0) {
+        close(sock);
+        return "127.0.0.1";
+    }
+    
+    struct sockaddr_in name;
+    socklen_t namelen = sizeof(name);
+    if (getsockname(sock, (struct sockaddr*)&name, &namelen) < 0) {
+        close(sock);
+        return "127.0.0.1";
+    }
+    
+    char buffer[INET_ADDRSTRLEN] = {0};
+    inet_ntop(AF_INET, &name.sin_addr, buffer, sizeof(buffer));
+    close(sock);
+    
+    return std::string(buffer);
 #endif
 }
 // ------------------------------------------------------
