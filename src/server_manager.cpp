@@ -988,7 +988,7 @@ void ServerManager::setup() {
         if (config.subprocess) {
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
             setup_subprocess(config);
-            continue;
+            continue; // Skip the native bind routine in the parent for this iteration
 #else
             log_->warn("Subprocess enabled in config, but not enabled at compile time");
 #endif
@@ -1011,7 +1011,7 @@ void ServerManager::setup() {
             auto peer = std::make_shared<Peer>();
             peer->enet_peer = enetPeer;
             peer->log = create_logger(std::format("Peer {}@{}", enetPeer->peer_id(), enetPeer->remote_endpoint()->to_string()));
-            peer->protocol = std::make_unique<ser::GpBinaryV18>();
+            peer->protocol = std::make_unique<ser::GpBinaryV18>(); // Default version
 #ifdef LUXON_SERVER_ENABLE_VISUALIZER
             peer->log->set_level(log_level::trace);
 #endif
@@ -1060,6 +1060,7 @@ void ServerManager::setup() {
 
                     if (state == enet::EnetConnectionState::Disconnected) {
                         lco_await handler->HandleDisconnect();
+                        // Self-destruct handler, this will invalidate the pointer
                         self.add_scheduled_task(0, [&self, handler]() { self.connections_.remove_if([handler](auto& v) { return v.get() == handler; }); });
                     }
                 }(*this, state, handler));
@@ -1150,6 +1151,7 @@ void ServerManager::setup() {
             };
 #endif
 
+            // Add to connection list
             auto& handlerPtr = connections_.emplace_back(std::move(handler));           
         };
 
@@ -1157,6 +1159,7 @@ void ServerManager::setup() {
             log_->info("[STUN:{}] NAT punch complete  --> {} <-- ", config.port, ep.to_string());
         };
 
+        // Make server ready for listening
         log_->info("Starting {} on port {}", ServerTypeToString(config.type), config.port);
 
         if (!server.bind(config.port, enable_ipv6_)) {
@@ -1164,6 +1167,7 @@ void ServerManager::setup() {
             continue;
         }
 
+        // Start STUN binding request if enabled
         if (!config.stun_server_host.empty()) {
             if (server.request_stun_binding(config.stun_server_host.c_str(), enable_ipv6_, config.stun_server_port)) {
                 log_->info("[STUN:{}] Starting NAT punch via STUN server: {}:{}", config.port, config.stun_server_host, config.stun_server_port);
@@ -1173,6 +1177,7 @@ void ServerManager::setup() {
             }
         }
 
+        // Add server to sock selector
         if (!sock_selector_.add_read_fd(server.native_handle(), [&server](int fd) {
                 ZoneScopedN("service_server");
                 server.service_self();
@@ -1198,17 +1203,21 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
         return;
     }
 
+    // Emplace IPC into manager's tracked subprocesses
     IPC& ipc = subprocesses_.try_emplace(config.port, std::move(*ipc_opt)).first->second;
 
+    // Set sock selector handler
     sock_selector_.add_read_fd(ipc.get_fd(), [this, &ipc](SockSelector::socket_t) {
         while (const auto ipc_msg = ipc.receive_message())
             process_child_ipc_message(ipc, *ipc_msg);
         ipc_broadcast_skip_ = nullptr;
     });
 
+    // Trigger external subprocess handler using new child socket
     handle_start_subprocess(IPC::socket_to_string(ipc.get_child_fd()));
     ipc.close_child_fd();
 
+    // Synthesize child's configuration state
     ServerManagerConfig child_config;
     child_config.enable_ipv6 = enable_ipv6_;
     child_config.max_connections = max_connections_;
@@ -1219,6 +1228,7 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
         child_config.settings_database_path = settings_database_path + ":ro";
 #endif
 
+    // Make sure child actually binds server, doesn't endlessly fork and knows about all other servers
     for (const auto& cfg : configs_) {
         ServerConfig child_cfg = cfg;
         child_cfg.subprocess = false;
@@ -1231,12 +1241,14 @@ void ServerManager::setup_subprocess(const ServerConfig& config) {
     }
 
 #ifdef LUXON_SERVER_ENABLE_WEBSERVER
+    // Set up embedded HTTP server on child
     if (http_config_) {
         child_config.http = http_config_;
-        child_config.http->port += ipc.get_fd();
+        child_config.http->port += ipc.get_fd(); // Use a different port
     }
 #endif
 
+    // Encode the configuration object
     auto val_res = pfr_codec::to_value(child_config, {.zero_copy = true});
     if (val_res)
         ipc.send_message(luxon::ser::GenericValueMessage{std::move(*val_res)});
