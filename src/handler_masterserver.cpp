@@ -18,7 +18,6 @@
 #include <tracy/Tracy.hpp>
 
 // --- DYNAMIC ENDPOINT EXTERN ---
-// دسترسی به موتور ویندوزی ما که در فایل server_manager ساخته بودیم
 extern std::string get_local_ip_for_client(const std::string& target_ip);
 // -------------------------------
 
