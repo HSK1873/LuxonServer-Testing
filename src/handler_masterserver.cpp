@@ -17,10 +17,6 @@
 #include <luxon/common_codes.hpp>
 #include <tracy/Tracy.hpp>
 
-// --- DYNAMIC ENDPOINT EXTERN ---
-extern std::string get_local_ip_for_client(const std::string& target_ip);
-// -------------------------------
-
 // This is a very valuable ressource: https://doc.photonengine.com/realtime/current/lobby-and-matchmaking/matchmaking-and-lobby (2026-02-12)
 // http://web.archive.org/web/20260212131901/https://doc.photonengine.com/realtime/current/lobby-and-matchmaking/matchmaking-and-lobby
 
@@ -131,19 +127,6 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
         const auto get_random_gameserver_base_addr = [this] -> std::string_view {
             return server_manager_.get_random_server_base_address(ServerType::GameServer);
         };
-
-        // --- DYNAMIC ENDPOINT RESOLVER LAMBDA ---
-        auto resolve_dynamic_address = [this](const std::string& raw_addr) -> std::string {
-            if (!raw_addr.starts_with("AUTO:")) return raw_addr;
-            std::string ep_str = peer_->enet_peer->remote_endpoint()->to_string();
-            size_t colon = ep_str.find_last_of(':');
-            std::string clean_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
-            if (!clean_ip.empty() && clean_ip.front() == '[') clean_ip.erase(0, 1);
-            if (!clean_ip.empty() && clean_ip.back() == ']') clean_ip.erase(clean_ip.length() - 1);
-            if (clean_ip.starts_with("::ffff:")) clean_ip.erase(0, 7);
-            return get_local_ip_for_client(clean_ip) + ":" + raw_addr.substr(5);
-        };
-        // ----------------------------------------
 
         auto& app = *peer_->persistent->app;
 
@@ -328,12 +311,9 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
 
             // Build response
             ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::CreateGame, .return_code = ErrorCodes::Core::Ok};
-            
-            // --- DYNAMIC ENDPOINT OVERRIDE ---
-            std::string raw_addr = std::string(server_manager_.resolve_server_address(ServerType::GameServer, peer_->transport_protocol, game->server_address));
-            resp.parameters[DictKeyCodes::LoadBalancing::Address] = resolve_dynamic_address(raw_addr);
-            // ---------------------------------
-            
+            resp.parameters[DictKeyCodes::LoadBalancing::Address] =
+                resolve_dynamic_address(server_manager_.resolve_server_address(ServerType::GameServer, peer_->transport_protocol, game->server_address),
+                                        peer_->enet_peer->remote_endpoint()->to_string());
             resp.parameters[DictKeyCodes::LoadBalancing::Token] = peer_->persistent->token;
             resp.parameters[DictKeyCodes::GameAndActor::GameId] = game->id;
 
@@ -436,12 +416,9 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
 
             // Build and send response
             ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::JoinGame, .return_code = ErrorCodes::Core::Ok};
-            
-            // --- DYNAMIC ENDPOINT OVERRIDE ---
-            std::string raw_addr = std::string(server_manager_.resolve_server_address(ServerType::GameServer, peer_->transport_protocol, game->server_address));
-            resp.parameters[DictKeyCodes::LoadBalancing::Address] = resolve_dynamic_address(raw_addr);
-            // ---------------------------------
-            
+            resp.parameters[DictKeyCodes::LoadBalancing::Address] =
+                resolve_dynamic_address(server_manager_.resolve_server_address(ServerType::GameServer, peer_->transport_protocol, game->server_address),
+                                        peer_->enet_peer->remote_endpoint()->to_string());
             resp.parameters[DictKeyCodes::LoadBalancing::Token] = peer_->persistent->token;
             if (game->id != game_id)
                 resp.parameters[DictKeyCodes::GameAndActor::GameId] = game->id;
@@ -587,11 +564,10 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
             resp.operation_code = OpCodes::Matchmaking::JoinRandomGame;
             resp.return_code = ErrorCodes::Core::Ok;
 
-            // --- DYNAMIC ENDPOINT OVERRIDE ---
-            std::string raw_addr = std::string(server_manager_.resolve_server_address(ServerType::GameServer, peer_->transport_protocol, selected_game->server_address));
-            resp.parameters[DictKeyCodes::LoadBalancing::Address] = resolve_dynamic_address(raw_addr);
-            // ---------------------------------
-            
+            // Payload similar to Create/Join Game
+            resp.parameters[DictKeyCodes::LoadBalancing::Address] =
+                resolve_dynamic_address(server_manager_.resolve_server_address(ServerType::GameServer, peer_->transport_protocol, selected_game->server_address),
+                                        peer_->enet_peer->remote_endpoint()->to_string());
             resp.parameters[DictKeyCodes::LoadBalancing::Token] = peer_->persistent->token;
             resp.parameters[DictKeyCodes::GameAndActor::GameId] = selected_game->id;
 
