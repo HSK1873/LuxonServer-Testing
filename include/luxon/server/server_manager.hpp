@@ -53,6 +53,9 @@ struct Peer;
 struct PeerPersistent;
 class App;
 
+std::string get_local_ip_for_client(const std::string& target_ip);
+std::string resolve_dynamic_address(std::string_view configured_address, std::string_view client_endpoint);
+
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
 template <typename T> using HandlerPtr = std::shared_ptr<T>;
 #else
