@@ -1088,7 +1088,8 @@ void ServerManager::setup() {
             };
 
             enetPeer->on_state_changed = [this, handler = raw_handler](enet::EnetConnectionState state) {
-                lco_background([](ServerManager& self, enet::EnetConnectionState state, server::HandlerBase *handler) -> Awaitable<> {
+                // FIX: Define lambda as a variable first to avoid preprocessor undefined behavior in standard C++
+                auto coro_task = [](ServerManager& self, enet::EnetConnectionState state, server::HandlerBase *handler) -> Awaitable<> {
                     try {
                         lco_await handler->HandleENetConnectionStateChange(state);
                     } catch (const std::exception& e) {
@@ -1104,18 +1105,22 @@ void ServerManager::setup() {
                         // Self-destruct handler, this will invalidate the pointer
                         self.add_scheduled_task(0, [&self, handler]() { self.connections_.remove_if([handler](auto& v) { return v.get() == handler; }); });
                     }
-                }(*this, state, handler));
+                };
+
+                lco_background(coro_task(*this, state, handler));
             };
 
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
             enetPeer->on_payload_command = [this, handler_capture = std::weak_ptr<HandlerBase>(handler_ptr)](enet::EnetCommand&& cmd) {
-                lco_background([](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
+                // FIX: Define lambda as a variable first to avoid preprocessor undefined behavior in standard C++
+                auto coro_task = [](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
                     auto handler = h_token.lock();
                     if (!handler)
                         lco_return;
 #else
             enetPeer->on_payload_command = [this, handler_capture = handler_ptr](enet::EnetCommand&& cmd) {
-                lco_background([](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
+                // FIX: Define lambda as a variable first to avoid preprocessor undefined behavior in standard C++
+                auto coro_task = [](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
                     auto *handler = h_token;
 #endif
                     auto& peer = handler->get_peer();
@@ -1150,7 +1155,9 @@ void ServerManager::setup() {
                     }
                     self.active_command_restarter_.reset();
 #endif
-                }(*this, std::move(cmd), std::move(handler_capture)));
+                };
+
+                lco_background(coro_task(*this, std::move(cmd), std::move(handler_capture)));
             };
 
             // Add to connection list
