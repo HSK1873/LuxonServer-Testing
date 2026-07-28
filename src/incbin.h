@@ -1,3 +1,6 @@
+// Copyright (c) 2026, the Luxon Server contributors
+// SPDX-License-Identifier: BSD-3-Clause
+
 #pragma once
 
 #if defined(_MSC_VER) && !defined(__llvm__)
