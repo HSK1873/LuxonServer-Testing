@@ -1,0 +1,26 @@
+name: Build Default LuxonServer (Windows)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Configure CMake (Default Fast Build)
+      run: cmake -B build -A x64
+
+    - name: Build Project
+      run: cmake --build build --config Release
+
+    - name: Upload Artifact (Save the EXE)
+      uses: actions/upload-artifact@v4
+      with:
+        name: LuxonServer-Lightweight-Windows
+        path: build/Release/
