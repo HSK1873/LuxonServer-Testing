@@ -177,12 +177,32 @@ std::string resolve_dynamic_address(std::string_view configured_address, std::st
 
     std::string port = std::string(configured_address.substr(5));
     std::string ep_str(client_endpoint);
+    std::string client_ip;
 
-    size_t colon = ep_str.find_last_of(':');
-    std::string client_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
-    if (!client_ip.empty() && client_ip.front() == '[') client_ip.erase(0, 1);
-    if (!client_ip.empty() && client_ip.back() == ']') client_ip.erase(client_ip.length() - 1);
-    if (client_ip.starts_with("::ffff:")) client_ip.erase(0, 7);
+    // 1. Safe IP Extraction
+    size_t bracket_start = ep_str.find('[');
+    size_t bracket_end = ep_str.find(']');
+
+    if (bracket_start != std::string::npos && bracket_end != std::string::npos && bracket_end > bracket_start) {
+        // Case: IPv6 with bracket (e.g. "[fe80::1]:5058")
+        client_ip = ep_str.substr(bracket_start + 1, bracket_end - bracket_start - 1);
+    } else {
+        // Case: No brackets
+        size_t last_colon = ep_str.find_last_of(':');
+        size_t first_colon = ep_str.find_first_of(':');
+
+        if (last_colon != std::string::npos && first_colon == last_colon) {
+            // Exactly one ':' means IPv4 with port (e.g. "192.168.1.5:5058")
+            client_ip = ep_str.substr(0, last_colon);
+        } else {
+            // Multiple ':' means raw IPv6, No ':' means raw IPv4
+            client_ip = ep_str;
+        }
+    }
+
+    // 2. Remove IPv4-mapped IPv6 prefix if present (e.g. "::ffff:192.168.1.5")
+    if (client_ip.starts_with("::ffff:")) 
+        client_ip.erase(0, 7);
 
     return get_local_ip_for_client(client_ip) + ":" + port;
 }
