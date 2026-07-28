@@ -1,0 +1,26 @@
+name: Build Full LuxonServer (Windows)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Configure CMake
+      run: cmake -B build -DLUXON_SERVER_ENABLE_WEBSERVER=ON -DLUXON_SERVER_ENABLE_PLUGINS=ON -DLUXON_SERVER_BUILD_FFI=ON -DLUXON_SERVER_EXPOSE_FULL_FFI=ON -DLUXON_SERVER_ENABLE_MULTIPROCESSING=ON -DLUXON_SERVER_HOOKPOINTS=ON -DLUXON_SERVER_ENABLE_COMMAND_RESTARTER=ON -DLUXON_SERVER_ENABLE_SETTINGS_DATABASE=ON
+
+    - name: Build Project
+      run: cmake --build build --config Release
+
+    - name: Upload Artifact (Save the EXE)
+      uses: actions/upload-artifact@v4
+      with:
+        name: LuxonServer-Full-Features-Windows
+        path: build/Release/
