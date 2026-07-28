@@ -73,94 +73,83 @@
 #include <luxon/visualizer.hpp>
 #include <tracy/Tracy.hpp>
 
-// --- DYNAMIC ENDPOINT RESOLUTION INCLUDES & HELPERS ---
+// --- DYNAMIC ENDPOINT RESOLUTION HELPER ---
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
+using luxon_sock_t = SOCKET;
+#define LUXON_CLOSE_SOCKET closesocket
+#define LUXON_INVALID_SOCKET INVALID_SOCKET
+#define LUXON_SOCKET_ERROR SOCKET_ERROR
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
+using luxon_sock_t = int;
+#define LUXON_CLOSE_SOCKET close
+#define LUXON_INVALID_SOCKET (-1)
+#define LUXON_SOCKET_ERROR (-1)
 #endif
 
-thread_local std::string g_current_peer_ip = "";
-thread_local std::string g_dynamic_address_buffer = "";
+namespace server {
 
 std::string get_local_ip_for_client(const std::string& target_ip) {
-    if (target_ip.empty()) return "127.0.0.1";
+    if (target_ip.empty())
+        return "127.0.0.1";
 
-#ifdef _WIN32
-    // --- Windows Implementation (Winsock) ---
-    SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock == INVALID_SOCKET) return "127.0.0.1";
-    
-    sockaddr_in serv = {0};
-    serv.sin_family = AF_INET;
-    serv.sin_port = htons(53);
-    
-    if (inet_pton(AF_INET, target_ip.c_str(), &serv.sin_addr) <= 0) {
-        closesocket(sock);
+    luxon_sock_t sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == LUXON_INVALID_SOCKET)
         return "127.0.0.1";
-    }
-    
-    if (connect(sock, (const sockaddr*)&serv, sizeof(serv)) == SOCKET_ERROR) {
-        closesocket(sock);
-        return "127.0.0.1";
-    }
-    
-    sockaddr_in name = {0};
-    int namelen = sizeof(name);
-    if (getsockname(sock, (sockaddr*)&name, &namelen) == SOCKET_ERROR) {
-        closesocket(sock);
-        return "127.0.0.1";
-    }
-    
-    char buffer[INET_ADDRSTRLEN] = {0};
-    inet_ntop(AF_INET, &name.sin_addr, buffer, sizeof(buffer));
-    closesocket(sock);
-    
-    return std::string(buffer);
 
-#else
-    // --- Linux, macOS & BSD Implementation (POSIX Sockets) ---
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) return "127.0.0.1";
-    
-    struct sockaddr_in serv;
+    sockaddr_in serv;
     memset(&serv, 0, sizeof(serv));
     serv.sin_family = AF_INET;
     serv.sin_port = htons(53);
-    
+
     if (inet_pton(AF_INET, target_ip.c_str(), &serv.sin_addr) <= 0) {
-        close(sock);
+        LUXON_CLOSE_SOCKET(sock);
         return "127.0.0.1";
     }
-    
-    if (connect(sock, (const struct sockaddr*)&serv, sizeof(serv)) < 0) {
-        close(sock);
+
+    if (connect(sock, (const sockaddr*)&serv, sizeof(serv)) == LUXON_SOCKET_ERROR) {
+        LUXON_CLOSE_SOCKET(sock);
         return "127.0.0.1";
     }
-    
-    struct sockaddr_in name;
+
+    sockaddr_in name;
+    memset(&name, 0, sizeof(name));
     socklen_t namelen = sizeof(name);
-    if (getsockname(sock, (struct sockaddr*)&name, &namelen) < 0) {
-        close(sock);
+    if (getsockname(sock, (sockaddr*)&name, &namelen) == LUXON_SOCKET_ERROR) {
+        LUXON_CLOSE_SOCKET(sock);
         return "127.0.0.1";
     }
-    
+
     char buffer[INET_ADDRSTRLEN] = {0};
     inet_ntop(AF_INET, &name.sin_addr, buffer, sizeof(buffer));
-    close(sock);
-    
-    return std::string(buffer);
-#endif
-}
-// ------------------------------------------------------
+    LUXON_CLOSE_SOCKET(sock);
 
-namespace server {
+    return std::string(buffer);
+}
+
+std::string resolve_dynamic_address(std::string_view configured_address, std::string_view client_endpoint) {
+    if (!configured_address.starts_with("AUTO:"))
+        return std::string(configured_address);
+
+    std::string port = std::string(configured_address.substr(5));
+    std::string ep_str(client_endpoint);
+
+    size_t colon = ep_str.find_last_of(':');
+    std::string client_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
+    if (!client_ip.empty() && client_ip.front() == '[') client_ip.erase(0, 1);
+    if (!client_ip.empty() && client_ip.back() == ']') client_ip.erase(client_ip.length() - 1);
+    if (client_ip.starts_with("::ffff:")) client_ip.erase(0, 7);
+
+    return get_local_ip_for_client(client_ip) + ":" + port;
+}
+
 std::function<void(const std::string&)> ServerManager::handle_start_subprocess{};
 
 namespace {
@@ -427,9 +416,11 @@ template <typename T> T *GetRawPointer(const std::unique_ptr<T>& ptr) { return p
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
 ServerManagerConfig ServerManager::receive_config_from_ipc(IPC& ipc) {
     std::optional<luxon::ser::Message> msg;
+
     // Poll the non-blocking IPC socket until the parent transmits the configuration
     while (!(msg = ipc.receive_message()))
         ;
+
     // Expect a GenericValueMessage containing the PFR-encoded ServerManagerConfig
     if (auto *gvm = msg.value().get_if<luxon::ser::GenericValueMessage>()) {
         auto decoded = pfr_codec::from_value<ServerManagerConfig>(gvm->value);
@@ -571,12 +562,12 @@ std::string_view ServerManager::get_random_server_base_address(ServerType server
     ZoneScoped;
     std::vector<const ServerConfig *> candidates;
     candidates.reserve(configs_.size());
-    
+
     // Collect all valid endpoints for requested type
     for (const auto& cfg : configs_)
         if (cfg.type == server_type && !cfg.external_address.empty())
             candidates.push_back(&cfg);
-    
+
     // Handle cases where no config exists
     if (candidates.empty())
         throw std::runtime_error(std::format("No server configuration found for {}", ServerTypeToString(server_type)));
@@ -606,17 +597,7 @@ std::string_view ServerManager::resolve_server_address(ServerType type, ServerPr
 
 std::string_view ServerManager::get_random_server_address(ServerType server_type, ServerProtocol proto) {
     std::string_view base = get_random_server_base_address(server_type);
-    std::string_view resolved = resolve_server_address(server_type, proto, base);
-
-    // --- DYNAMIC ENDPOINT RESOLUTION INTERCEPT ---
-    if (resolved.starts_with("AUTO:")) {
-        std::string port = std::string(resolved.substr(5));
-        g_dynamic_address_buffer = get_local_ip_for_client(g_current_peer_ip) + ":" + port;
-        return g_dynamic_address_buffer;
-    }
-    // ---------------------------------------------
-
-    return resolved;
+    return resolve_server_address(server_type, proto, base);
 }
 
 void ServerManager::run_scheduled_tasks() {
@@ -666,7 +647,7 @@ bool ServerManager::run_once() {
         // End idle performance timer
         const auto end_time = std::chrono::steady_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-        
+
         // Store metric
         idle_time.add(static_cast<unsigned>(duration));
 #endif
@@ -830,6 +811,7 @@ void ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& m
     auto *event_msg = msg.get_if<ser::EventMessage>();
     if (!event_msg)
         return;
+
     return process_ipc_event(*event_msg);
 }
 
@@ -840,6 +822,7 @@ void ServerManager::process_parent_ipc_message(IPC& sender, const ser::Message& 
     auto *event_msg = msg.get_if<ser::EventMessage>();
     if (!event_msg)
         return;
+
     return process_ipc_event(*event_msg);
 }
 
@@ -863,6 +846,7 @@ void ServerManager::process_ipc_event(const ser::EventMessage& event_msg) {
                 // Remove from external games tracking
                 external_games_.erase(it);
             }
+
             return;
         } else if (event_msg.event_code == IPCEventCodes::GameUpdate) {
             // Handle game update
@@ -981,7 +965,7 @@ void ServerManager::setup() {
     cfg.disconnect_timeout_ms = 5000;
 
     // Create servers
-    for (const auto& config : configs_) {
+    for (auto& config : configs_) {
         if (config.is_routing_only)
             continue;
 
@@ -1068,21 +1052,16 @@ void ServerManager::setup() {
 
 #ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
             enetPeer->on_payload_command = [this, handler_capture = std::weak_ptr<HandlerBase>(handler_ptr)](enet::EnetCommand&& cmd) {
-                auto coroutine = [](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
+                lco_background([](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
                     auto handler = h_token.lock();
                     if (!handler)
                         lco_return;
+#else
+            enetPeer->on_payload_command = [this, handler_capture = handler_ptr](enet::EnetCommand&& cmd) {
+                lco_background([](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
+                    auto *handler = h_token;
+#endif
                     auto& peer = handler->get_peer();
-
-                    // --- DYNAMIC ENDPOINT: CLEAN AND RECORD CLIENT IP ---
-                    std::string ep_str = peer->enet_peer->remote_endpoint()->to_string();
-                    size_t colon = ep_str.find_last_of(':');
-                    std::string clean_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
-                    if (!clean_ip.empty() && clean_ip.front() == '[') clean_ip.erase(0, 1);
-                    if (!clean_ip.empty() && clean_ip.back() == ']') clean_ip.erase(clean_ip.length() - 1);
-                    if (clean_ip.starts_with("::ffff:")) clean_ip.erase(0, 7);
-                    g_current_peer_ip = clean_ip;
-                    // ----------------------------------------------------
 
 #ifdef LUXON_SERVER_ENABLE_VISUALIZER
                     peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
@@ -1094,62 +1073,28 @@ void ServerManager::setup() {
                         }
                     }
 #endif
+
+#ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
                     self.active_command_restarter_ = CommandRestarter::create(handler, cmd);
                     self.active_command_restarter_allowed_ = true;
                     self.inside_command_ = true;
-
+#endif
                     try {
                         lco_await handler->HandleENetCommand(std::move(cmd));
                     } catch (const std::exception& e) {
                         peer->log->critical("Disconnecting due to uncaught exception in ENet command handler: {}", e.what());
                         peer->disconnect();
                     }
-
+#ifdef LUXON_SERVER_ENABLE_COMMAND_RESTARTER
                     self.inside_command_ = false;
                     if (self.active_command_restarter_allowed_ && !self.should_abort_active_command()) {
                         peer->log->warn("Command did not commit!");
                         self.mark_command_committed();
                     }
                     self.active_command_restarter_.reset();
-                };
-                lco_background(coroutine(*this, std::move(cmd), std::move(handler_capture)));
-            };
-#else
-            enetPeer->on_payload_command = [this, handler_capture = handler_ptr](enet::EnetCommand&& cmd) {
-                auto coroutine = [](ServerManager& self, enet::EnetCommand cmd, auto h_token) -> Awaitable<> {
-                    auto *handler = h_token;
-                    auto& peer = handler->get_peer();
-
-                    // --- DYNAMIC ENDPOINT: CLEAN AND RECORD CLIENT IP ---
-                    std::string ep_str = peer->enet_peer->remote_endpoint()->to_string();
-                    size_t colon = ep_str.find_last_of(':');
-                    std::string clean_ip = (colon != std::string::npos) ? ep_str.substr(0, colon) : ep_str;
-                    if (!clean_ip.empty() && clean_ip.front() == '[') clean_ip.erase(0, 1);
-                    if (!clean_ip.empty() && clean_ip.back() == ']') clean_ip.erase(clean_ip.length() - 1);
-                    if (clean_ip.starts_with("::ffff:")) clean_ip.erase(0, 7);
-                    g_current_peer_ip = clean_ip;
-                    // ----------------------------------------------------
-
-#ifdef LUXON_SERVER_ENABLE_VISUALIZER
-                    peer->log->trace("Received message using mode {} on channel {}:", static_cast<int>(enet::FlagsToEnetDeliveryMode(cmd.header.flags)),
-                                     cmd.header.channel_id);
-                    if (!visualizer::print_ser_message(cmd.get_payload(), 2, *peer->protocol)) {
-                        if (!visualizer::print_http_message(cmd.get_payload(), 2)) {
-                            peer->log->error("Message not understood!");
-                            visualizer::helpers::print_hex_dump(cmd.get_payload(), 2);
-                        }
-                    }
 #endif
-                    try {
-                        lco_await handler->HandleENetCommand(std::move(cmd));
-                    } catch (const std::exception& e) {
-                        peer->log->critical("Disconnecting due to uncaught exception in ENet command handler: {}", e.what());
-                        peer->disconnect();
-                    }
-                };
-                lco_background(coroutine(*this, std::move(cmd), std::move(handler_capture)));
+                }(*this, std::move(cmd), std::move(handler_capture)));
             };
-#endif
 
             // Add to connection list
             auto& handlerPtr = connections_.emplace_back(std::move(handler));           
@@ -1157,6 +1102,9 @@ void ServerManager::setup() {
 
         server.on_stun_bind = [this, &config](enet::EnetEndpoint&& ep) {
             log_->info("[STUN:{}] NAT punch complete  --> {} <-- ", config.port, ep.to_string());
+            if (config.external_address.starts_with("STUNAUTO")) {
+                config.external_address = ep.to_string();
+            }
         };
 
         // Make server ready for listening
@@ -1167,11 +1115,17 @@ void ServerManager::setup() {
             continue;
         }
 
-        // Start STUN binding request if enabled
-        if (!config.stun_server_host.empty()) {
-            if (server.request_stun_binding(config.stun_server_host.c_str(), enable_ipv6_, config.stun_server_port)) {
-                log_->info("[STUN:{}] Starting NAT punch via STUN server: {}:{}", config.port, config.stun_server_host, config.stun_server_port);
-                stun_keepalive(server, config.port);
+        // Start STUN binding request if enabled or STUNAUTO
+        bool is_stunauto = config.external_address.starts_with("STUNAUTO");
+        if (!config.stun_server_host.empty() || is_stunauto) {
+            std::string stun_host = config.stun_server_host.empty() ? "stun.l.google.com" : config.stun_server_host;
+            uint16_t stun_port = config.stun_server_port == 0 ? 19302 : config.stun_server_port;
+            
+            if (server.request_stun_binding(stun_host.c_str(), enable_ipv6_, stun_port)) {
+                log_->info("[STUN:{}] Starting NAT punch via STUN server: {}:{}", config.port, stun_host, stun_port);
+                if (!is_stunauto) {
+                    stun_keepalive(server, config.port);
+                }
             } else {
                 log_->error("[STUN:{}] Failed to start NAT punch via STUN server", config.port);
             }
