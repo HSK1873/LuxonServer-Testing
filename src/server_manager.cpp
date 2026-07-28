@@ -75,6 +75,9 @@
 
 // --- DYNAMIC ENDPOINT RESOLUTION HELPER ---
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
@@ -100,38 +103,72 @@ std::string get_local_ip_for_client(const std::string& target_ip) {
     if (target_ip.empty())
         return "127.0.0.1";
 
-    luxon_sock_t sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    bool is_ipv6 = target_ip.find(':') != std::string::npos;
+    int domain = is_ipv6 ? AF_INET6 : AF_INET;
+
+    luxon_sock_t sock = socket(domain, SOCK_DGRAM, IPPROTO_UDP);
     if (sock == LUXON_INVALID_SOCKET)
-        return "127.0.0.1";
+        return is_ipv6 ? "::1" : "127.0.0.1";
 
-    sockaddr_in serv;
-    memset(&serv, 0, sizeof(serv));
-    serv.sin_family = AF_INET;
-    serv.sin_port = htons(53);
+    if (is_ipv6) {
+        sockaddr_in6 serv;
+        memset(&serv, 0, sizeof(serv));
+        serv.sin6_family = AF_INET6;
+        serv.sin6_port = htons(53);
 
-    if (inet_pton(AF_INET, target_ip.c_str(), &serv.sin_addr) <= 0) {
+        if (inet_pton(AF_INET6, target_ip.c_str(), &serv.sin6_addr) <= 0) {
+            LUXON_CLOSE_SOCKET(sock);
+            return "::1";
+        }
+
+        if (connect(sock, (const sockaddr*)&serv, sizeof(serv)) == LUXON_SOCKET_ERROR) {
+            LUXON_CLOSE_SOCKET(sock);
+            return "::1";
+        }
+
+        sockaddr_in6 name;
+        memset(&name, 0, sizeof(name));
+        socklen_t namelen = sizeof(name);
+        if (getsockname(sock, (sockaddr*)&name, &namelen) == LUXON_SOCKET_ERROR) {
+            LUXON_CLOSE_SOCKET(sock);
+            return "::1";
+        }
+
+        char buffer[INET6_ADDRSTRLEN] = {0};
+        inet_ntop(AF_INET6, &name.sin6_addr, buffer, sizeof(buffer));
         LUXON_CLOSE_SOCKET(sock);
-        return "127.0.0.1";
-    }
 
-    if (connect(sock, (const sockaddr*)&serv, sizeof(serv)) == LUXON_SOCKET_ERROR) {
+        return std::string(buffer);
+    } else {
+        sockaddr_in serv;
+        memset(&serv, 0, sizeof(serv));
+        serv.sin_family = AF_INET;
+        serv.sin_port = htons(53);
+
+        if (inet_pton(AF_INET, target_ip.c_str(), &serv.sin_addr) <= 0) {
+            LUXON_CLOSE_SOCKET(sock);
+            return "127.0.0.1";
+        }
+
+        if (connect(sock, (const sockaddr*)&serv, sizeof(serv)) == LUXON_SOCKET_ERROR) {
+            LUXON_CLOSE_SOCKET(sock);
+            return "127.0.0.1";
+        }
+
+        sockaddr_in name;
+        memset(&name, 0, sizeof(name));
+        socklen_t namelen = sizeof(name);
+        if (getsockname(sock, (sockaddr*)&name, &namelen) == LUXON_SOCKET_ERROR) {
+            LUXON_CLOSE_SOCKET(sock);
+            return "127.0.0.1";
+        }
+
+        char buffer[INET_ADDRSTRLEN] = {0};
+        inet_ntop(AF_INET, &name.sin_addr, buffer, sizeof(buffer));
         LUXON_CLOSE_SOCKET(sock);
-        return "127.0.0.1";
+
+        return std::string(buffer);
     }
-
-    sockaddr_in name;
-    memset(&name, 0, sizeof(name));
-    socklen_t namelen = sizeof(name);
-    if (getsockname(sock, (sockaddr*)&name, &namelen) == LUXON_SOCKET_ERROR) {
-        LUXON_CLOSE_SOCKET(sock);
-        return "127.0.0.1";
-    }
-
-    char buffer[INET_ADDRSTRLEN] = {0};
-    inet_ntop(AF_INET, &name.sin_addr, buffer, sizeof(buffer));
-    LUXON_CLOSE_SOCKET(sock);
-
-    return std::string(buffer);
 }
 
 std::string resolve_dynamic_address(std::string_view configured_address, std::string_view client_endpoint) {
@@ -582,14 +619,14 @@ std::string_view ServerManager::resolve_server_address(ServerType type, ServerPr
     for (const auto& cfg : configs_) {
         if (cfg.type == type && cfg.external_address == base_address) {
             if (proto == ServerProtocol::UDP)
-                return cfg.external_address;
+                return cfg.stun_resolved_address.empty() ? cfg.external_address : cfg.stun_resolved_address;
 
             for (const auto& proxy : cfg.proxies)
                 if (proxy.protocol == proto)
                     return proxy.address;
 
             // Fallback
-            return cfg.external_address;
+            return cfg.stun_resolved_address.empty() ? cfg.external_address : cfg.stun_resolved_address;
         }
     }
     return base_address;
@@ -804,7 +841,7 @@ void ServerManager::setup_http_server() {
 #endif
 
 #ifdef LUXON_SERVER_ENABLE_MULTIPROCESSING
-void ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& msg) {
+void ServerManager::process_child_ipc_message(IPC& sender, const luxon::ser::Message& msg) {
     ipc_broadcast_skip_ = &sender;
 
     // Only accept event messages
@@ -815,7 +852,7 @@ void ServerManager::process_child_ipc_message(IPC& sender, const ser::Message& m
     return process_ipc_event(*event_msg);
 }
 
-void ServerManager::process_parent_ipc_message(IPC& sender, const ser::Message& msg) {
+void ServerManager::process_parent_ipc_message(IPC& sender, const luxon::ser::Message& msg) {
     ipc_broadcast_skip_ = &sender;
 
     // Only accept event messages
@@ -1100,10 +1137,10 @@ void ServerManager::setup() {
             auto& handlerPtr = connections_.emplace_back(std::move(handler));           
         };
 
-        server.on_stun_bind = [this, &config](enet::EnetEndpoint&& ep) {
-            log_->info("[STUN:{}] NAT punch complete  --> {} <-- ", config.port, ep.to_string());
-            if (config.external_address.starts_with("STUNAUTO")) {
-                config.external_address = ep.to_string();
+        server.on_stun_bind = [this, cfg_ptr = &config](enet::EnetEndpoint&& ep) {
+            log_->info("[STUN:{}] NAT punch complete  --> {} <-- ", cfg_ptr->port, ep.to_string());
+            if (cfg_ptr->external_address.starts_with("STUNAUTO")) {
+                cfg_ptr->stun_resolved_address = ep.to_string();
             }
         };
 
