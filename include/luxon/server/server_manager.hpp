@@ -79,6 +79,7 @@ struct ServerConfig {
     uint16_t stun_server_port = 19302;
 
     std::string external_address;
+    std::string stun_resolved_address;
     std::vector<ProxyConfig> proxies;
 };
 
