@@ -1,3 +1,16 @@
+# ==========================================
+# Luxon Server Configuration
+# ==========================================
+
+# Servers Configuration
+# 
+# Endpoint Resolution Methods for 'external_address':
+# 1. Static IP   : Directly specify the IP and Port (e.g., 127.0.0.1:5058).
+# 2. AUTO:port   : Dynamically resolves the correct local IP based on the client's 
+#                  connection. Highly recommended for LAN or VPN setups (e.g., AUTO:5058).
+# 3. STUNAUTO    : Automatically performs NAT traversal via a STUN server to resolve 
+#                  your public IP and Port. Ideal for public servers behind routers.
+
 # Servers
 
 Servers:
